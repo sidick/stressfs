@@ -84,7 +84,15 @@
  * packet.h's header comments) -- it is not part of the proposal's
  * public CLI surface, just a developer/CI knob to prove the hang path
  * on demand without needing a real misbehaving handler. */
-#define STRESSFS_TEMPLATE "CONFORM/S,RANDOM/S,SEED/N/K,VOLUME/K,SELFTESTHANG/S"
+/* M2: TIER/K added -- the proposal's run-identity "tier" field
+ * (docs/implementation-plan.md M2 step 1: "a TIER/K ReadArgs option is
+ * a reasonable way to let the invoking script state it, default to
+ * 'unknown'"). The binary itself cannot always know which tier it is
+ * running under (the same cross-built executable runs unmodified under
+ * volamos, Copperline and real hardware), so the invoking script
+ * (ci/cross-build.sh's callers, ci/copperline-m2.sh, a future hardware
+ * runner) states it explicitly. */
+#define STRESSFS_TEMPLATE "CONFORM/S,RANDOM/S,SEED/N/K,VOLUME/K,TIER/K,SELFTESTHANG/S"
 #define STRESSFS_DOS_VERSION 37L /* V37 = AmigaOS 2.04, this project's floor */
 
 /* ReadArgs() argument slots, in template order. */
@@ -93,6 +101,7 @@ enum {
     ARG_RANDOM,
     ARG_SEED,
     ARG_VOLUME,
+    ARG_TIER,
     ARG_SELFTESTHANG,
     ARG_COUNT
 };
@@ -109,6 +118,7 @@ int main(void)
     struct Library *dos_version_check;
     LONG seed = 0;
     CONST_STRPTR volume = (CONST_STRPTR)"SYS:";
+    CONST_STRPTR tier = (CONST_STRPTR)"unknown";
     int rc = RETURN_OK;
     int i;
 
@@ -137,6 +147,9 @@ int main(void)
     if (args[ARG_VOLUME] != 0) {
         volume = (CONST_STRPTR)args[ARG_VOLUME];
     }
+    if (args[ARG_TIER] != 0) {
+        tier = (CONST_STRPTR)args[ARG_TIER];
+    }
 
     Printf((CONST_STRPTR)"stressfs: CONFORM=%ld RANDOM=%ld SEED=%ld VOLUME=%s\n",
            (LONG)(args[ARG_CONFORM] != 0),
@@ -152,7 +165,8 @@ int main(void)
      * `stressfs VOLUME=...` with no switches is still the M0 proof
      * unchanged. */
     if (args[ARG_CONFORM] != 0) {
-        rc = stressfs_conform_run((const char *)volume, args[ARG_SELFTESTHANG] != 0);
+        rc = stressfs_conform_run((const char *)volume, (const char *)tier, seed,
+                                   args[ARG_SELFTESTHANG] != 0);
         FreeArgs(rdargs);
         return rc;
     }

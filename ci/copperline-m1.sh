@@ -122,10 +122,11 @@ else
 fi
 
 if [ "$MODE" = "selftest-hang" ]; then
-  # RETURN_WARN (5): the watchdog correctly detected the hang -- the
-  # expected, successful demonstration. Anything else is a real
-  # failure of the mechanism itself.
-  if [ "$rc" = 5 ]; then
+  # RETURN_ERROR (10, M2's exit-code scheme -- see
+  # amiga/include/stressfs/conform_run.h): the watchdog correctly
+  # detected the hang -- the expected, successful demonstration.
+  # Anything else is a real failure of the mechanism itself.
+  if [ "$rc" = 10 ]; then
     echo "== watchdog self-test: hang correctly detected =="
     exit 0
   fi

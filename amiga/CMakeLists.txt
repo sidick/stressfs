@@ -46,6 +46,7 @@ endif()
 add_library(stressfs-lib STATIC
   lib/prng.c
   lib/conform.c
+  lib/report.c
 )
 
 target_include_directories(stressfs-lib PUBLIC include)
@@ -102,4 +103,21 @@ if(NOT CMAKE_CROSSCOMPILING)
   endif()
 
   add_test(NAME conform_test COMMAND conform_test)
+
+  # M2: the writer's golden-file-validated host test
+  # (docs/implementation-plan.md M2 exit criterion). Passed the golden
+  # directory as a compile definition so the test binary can find the
+  # fixtures regardless of the build directory's location.
+  add_executable(report_test tests/report_test.c)
+  target_link_libraries(report_test PRIVATE stressfs-lib)
+  target_compile_options(report_test PRIVATE -Wall -Wextra -Werror)
+  target_compile_definitions(report_test PRIVATE
+    STRESSFS_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/golden")
+
+  if(STRESSFS_SANITIZERS)
+    target_compile_options(report_test PRIVATE -fsanitize=address,undefined -g)
+    target_link_options(report_test PRIVATE -fsanitize=address,undefined)
+  endif()
+
+  add_test(NAME report_test COMMAND report_test)
 endif()

@@ -8,6 +8,7 @@
 #include <exec/types.h>
 #include <dos/dos.h>
 #include <dos/dosextens.h>
+#include <dos/filehandler.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
 
@@ -194,4 +195,77 @@ void stressfs_identify_handler(const char *volume_name,
         }
         UnLockDosList(LDF_DEVICES | LDF_READ);
     }
+}
+
+void stressfs_fetch_dosenvec(const char *volume_name, stressfs_dosenvec_t *out)
+{
+    char name_buf[108];
+    size_t name_len = 0;
+    struct DosList *dlist;
+    struct MsgPort *target_port = NULL;
+    struct DosList *ddl;
+
+    memset(out, 0, sizeof(*out));
+    if (volume_name == NULL) {
+        return;
+    }
+
+    while (volume_name[name_len] != '\0' && volume_name[name_len] != ':' &&
+           name_len < sizeof(name_buf) - 1) {
+        name_buf[name_len] = volume_name[name_len];
+        name_len++;
+    }
+    name_buf[name_len] = '\0';
+
+    dlist = LockDosList(LDF_VOLUMES | LDF_READ);
+    if (dlist != NULL) {
+        dlist = FindDosEntry(dlist, (CONST_STRPTR)name_buf, LDF_VOLUMES);
+    }
+    if (dlist != NULL) {
+        target_port = dlist->dol_Task;
+    }
+    UnLockDosList(LDF_VOLUMES | LDF_READ);
+
+    if (target_port == NULL) {
+        return;
+    }
+
+    ddl = LockDosList(LDF_DEVICES | LDF_READ);
+    for (;;) {
+        ddl = NextDosEntry(ddl, LDF_DEVICES);
+        if (ddl == NULL) {
+            break;
+        }
+        if (ddl->dol_Task == target_port) {
+            BPTR startup_bptr = (BPTR)ddl->dol_misc.dol_handler.dol_Startup;
+            if (startup_bptr != 0) {
+                struct FileSysStartupMsg *fssm =
+                    (struct FileSysStartupMsg *)BADDR(startup_bptr);
+                if (fssm != NULL && fssm->fssm_Environ != 0) {
+                    struct DosEnvec *de =
+                        (struct DosEnvec *)BADDR(fssm->fssm_Environ);
+                    if (de != NULL) {
+                        out->have_envec = 1;
+                        out->de_tablesize = (unsigned long)de->de_TableSize;
+                        out->de_sizeblock = (unsigned long)de->de_SizeBlock;
+                        out->de_surfaces = (unsigned long)de->de_Surfaces;
+                        out->de_sectorperblock = (unsigned long)de->de_SectorPerBlock;
+                        out->de_blockspertrack = (unsigned long)de->de_BlocksPerTrack;
+                        out->de_reserved = (unsigned long)de->de_Reserved;
+                        out->de_prealloc = (unsigned long)de->de_PreAlloc;
+                        out->de_interleave = (unsigned long)de->de_Interleave;
+                        out->de_lowcyl = (unsigned long)de->de_LowCyl;
+                        out->de_highcyl = (unsigned long)de->de_HighCyl;
+                        out->de_numbuffers = (unsigned long)de->de_NumBuffers;
+                        out->de_maxtransfer = (unsigned long)de->de_MaxTransfer;
+                        out->de_mask = (unsigned long)de->de_Mask;
+                        out->de_bootpri = (long)de->de_BootPri;
+                        out->de_dostype = (unsigned long)de->de_DosType;
+                    }
+                }
+            }
+            break;
+        }
+    }
+    UnLockDosList(LDF_DEVICES | LDF_READ);
 }

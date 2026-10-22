@@ -1,0 +1,7 @@
+stressfs run identity: harness=0.1.0-m2 handler="DOS\1" ($VER: FastFileSystem 45.1 (1.1.1999)) tier=copperline seed=12345 dos_version=47
+stressfs run identity: geometry numblocks=1024000 numblocksused=512000 bytesperblock=512 disktype=0x444f5301
+stressfs run identity: dosenvec surfaces=2 sectorperblock=1 blockspertrack=112 reserved=2 prealloc=0 lowcyl=0 highcyl=1546 numbuffers=30 maxtransfer=2147483646 dostype=0x444f5301 bootpri=0
+pass         oracle=independent section=packet-documentation.md#ACTION_IS_FILESYSTEM     res1=-1     res2=0     ACTION_IS_FILESYSTEM
+fail         oracle=model       section=implementation-plan.md#M1                        res1=-1     res2=0     ENGINE SELF-TEST: deliberately wrong expectation
+unsupported  oracle=correlated  section=packet-documentation.md#ACTION_SAME_LOCK         res1=0      res2=0     ACTION_SAME_LOCK (requires V36)
+inconclusive oracle=independent section=packet-documentation.md#ACTION_READ              res1=0      res2=0     ACTION_READ (probe.txt contents)

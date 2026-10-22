@@ -5,6 +5,7 @@
  */
 
 #include "stressfs/conform.h"
+#include "stressfs/report.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -89,4 +90,42 @@ void stressfs_conform_format_line(char *buf, size_t bufsz,
      * test name and the raw dp_Res1/dp_Res2 for debugging. */
     snprintf(buf, bufsz, "%-12s oracle=%-11s section=%-48s res1=%-6ld res2=%-4ld  %s",
              verdict_name, oracle, section, got.res1, got.res2, name);
+}
+
+void stressfs_conform_format_json(char *buf, size_t bufsz,
+                                   const stressfs_test_entry_t *entry,
+                                   stressfs_verdict_t verdict,
+                                   stressfs_pkt_result_t got)
+{
+    const char *name = (entry != NULL && entry->name != NULL) ? entry->name : "?";
+    const char *section = (entry != NULL && entry->section != NULL) ? entry->section : "?";
+    const char *oracle = stressfs_oracle_name(entry != NULL ? entry->oracle : STRESSFS_ORACLE_MODEL);
+    const char *verdict_name = stressfs_verdict_name(verdict);
+    size_t len;
+
+    if (buf == NULL || bufsz == 0) {
+        return;
+    }
+    buf[0] = '\0';
+
+    /* Schema (M2, stable from here on -- see conform.h's header
+     * comment): {"type":"test_result","verdict":...,"oracle":...,
+     * "section":...,"name":...,"res1":N,"res2":N,"applied_quirks":[]}.
+     * applied_quirks is always [] at M2; M3 populates it. */
+    snprintf(buf, bufsz, "{\"type\":\"test_result\",\"verdict\":\"%s\",\"oracle\":\"%s\",\"section\":\"",
+              verdict_name, oracle);
+    stressfs_json_escape_append(buf, bufsz, section);
+
+    len = strlen(buf);
+    if (len < bufsz) {
+        snprintf(buf + len, bufsz - len, "\",\"name\":\"");
+    }
+    stressfs_json_escape_append(buf, bufsz, name);
+
+    len = strlen(buf);
+    if (len < bufsz) {
+        snprintf(buf + len, bufsz - len,
+                 "\",\"res1\":%ld,\"res2\":%ld,\"applied_quirks\":[]}",
+                 got.res1, got.res2);
+    }
 }

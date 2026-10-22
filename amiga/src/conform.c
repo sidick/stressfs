@@ -49,6 +49,7 @@
 #include "stressfs/conform.h"
 #include "stressfs/packet.h"
 #include "stressfs/handler_id.h"
+#include "stressfs/report.h"
 
 #include <exec/types.h>
 #include <dos/dos.h>
@@ -56,8 +57,18 @@
 #include <proto/exec.h>
 #include <proto/dos.h>
 
+#include <assert.h>
 #include <string.h>
 #include <stdio.h>
+
+/* M2 exit-code priority: see conform_run.h's header comment for the
+ * full scheme and rationale. RETURN_ERROR is not defined by every
+ * dos/dos.h across OS versions this project targets (it is, from
+ * V37's dos/dos.h onward, but define it defensively rather than risk
+ * a build break on an older header). */
+#ifndef RETURN_ERROR
+#define RETURN_ERROR 10
+#endif
 
 #define STRESSFS_WATCHDOG_SECS 10u
 
@@ -824,32 +835,108 @@ static const stressfs_test_entry_t g_table[] = {
 /* Driver.                                                             */
 /* ------------------------------------------------------------------ */
 
-/* Headless Copperline runs (ci/copperline-m1.sh) have no console
- * window to capture Printf() output from, so every report line is
- * also written to a plain file in the current directory -- under
- * `copperline --run`, the current directory is RunProg:, which is the
- * host directory holding the cross-built binary itself, so the CI
- * script can read this file straight back off the host filesystem
- * after the run returns. Opened once per real run (not the
- * self-test-hang mode, which prints one line and is meant for
- * interactive/manual use). */
-static BPTR g_report_file = 0;
+/* M2 dual-output decision (docs/implementation-plan.md M2 step 3; see
+ * also this file's own header comment, which predates M2 and already
+ * explains why the human-readable file exists):
+ *
+ *   docs/proposal.md's Layer 1 "Output" paragraph reads: "one line per
+ *   test with verdict, oracle class, the manual section it comes from,
+ *   and every quirk that was applied ..., machine-readable for CI and
+ *   readable in a Shell." The implementation plan's own M2 wording
+ *   ("machine-readable ... AND a human-readable Shell rendering ...
+ *   Output to console, file or serial") separates "machine-readable"
+ *   and "human-readable" as two adjectives for the SAME per-test
+ *   event, immediately followed by a separate sentence about output
+ *   DESTINATIONS (console/file/serial) -- i.e. the content split
+ *   (human vs. JSON) and the destination split (console vs. file) are
+ *   two independent axes, not one combined decision forced by the
+ *   proposal's wording alone.
+ *
+ *   Decision taken here: SEPARATE CHANNELS, each carrying one of the
+ *   two renderings in full, rather than interleaving both renderings
+ *   into one stream. Concretely: the human-readable line (unchanged
+ *   from M1) goes to the console via Printf() AND to
+ *   stressfs-conform-report.txt; the JSON-lines rendering is new in
+ *   M2 and goes to its own file, stressfs-conform-report.json, and
+ *   NOT to the console. Rationale: a human reading the console output
+ *   of a headless Copperline run (ci/copperline-m2.sh's screenshot
+ *   mode, or a developer's own interactive run) wants the Shell-style
+ *   line, not raw JSON scrolling past; a CI `ci/` checker consuming
+ *   the report wants one well-formed JSON document per line with
+ *   nothing else interleaved on the same stream (mixing the two into
+ *   one file would mean every consumer has to filter lines by their
+ *   first character, which is exactly the kind of fragile convention
+ *   the JSON-lines format exists to avoid). Keeping them as two files
+ *   also means a byte-for-byte golden-file ctest (this milestone's
+ *   exit criterion) can check each rendering independently without
+ *   needing to agree on an interleaving order. */
+static BPTR g_report_file = 0;      /* stressfs-conform-report.txt, human-readable */
+static BPTR g_report_json_file = 0; /* stressfs-conform-report.json, JSON-lines */
+
+/* Second copy of each file, opened directly on the TARGET VOLUME
+ * rather than the relative/RunProg: path above. Why both: the
+ * relative path resolves to RunProg: (the host directory holding the
+ * cross-built binary) under a real Copperline run, which is exactly
+ * what M1's host-side CI script wants and deliberately avoids writing
+ * harness artefacts onto the volume under test -- but under volamos,
+ * Open() against a relative path, RAM: or T: is faked (always
+ * "succeeds" but never touches the host filesystem; verified by
+ * hand while building this milestone), and the ONLY path volamos
+ * backs with real host I/O is one under an explicitly `-V`-mapped
+ * assign, i.e. the volume this run is actually testing. Since M1
+ * already writes fixture files onto that same volume (the
+ * `stressfs-m1` subdirectory) this is not a new category of "touching
+ * the volume under test" -- it is the same thing M1 already does, one
+ * level higher (the volume root instead of a subdirectory). Both
+ * copies are opened every time; whichever one(s) a given tier can
+ * actually back with real storage is what ends up readable
+ * afterwards, and print_line()/report_note()/emit_run_identity() write
+ * to every handle that opened successfully. */
+static BPTR g_report_file_vol = 0;
+static BPTR g_report_json_file_vol = 0;
 
 static void print_line(const stressfs_test_entry_t *entry, stressfs_verdict_t verdict,
                         stressfs_pkt_result_t got)
 {
     char buf[256];
+    char jbuf[512];
+
     stressfs_conform_format_line(buf, sizeof(buf), entry, verdict, got);
     Printf((CONST_STRPTR)"%s\n", (CONST_STRPTR)buf);
     if (g_report_file != 0) {
         FPuts(g_report_file, (CONST_STRPTR)buf);
         FPuts(g_report_file, (CONST_STRPTR)"\n");
     }
+    if (g_report_file_vol != 0) {
+        FPuts(g_report_file_vol, (CONST_STRPTR)buf);
+        FPuts(g_report_file_vol, (CONST_STRPTR)"\n");
+    }
+
+    stressfs_conform_format_json(jbuf, sizeof(jbuf), entry, verdict, got);
+    if (g_report_json_file != 0) {
+        FPuts(g_report_json_file, (CONST_STRPTR)jbuf);
+        FPuts(g_report_json_file, (CONST_STRPTR)"\n");
+    }
+    if (g_report_json_file_vol != 0) {
+        FPuts(g_report_json_file_vol, (CONST_STRPTR)jbuf);
+        FPuts(g_report_json_file_vol, (CONST_STRPTR)"\n");
+    }
 }
 
-static void report_file_open(void)
+static void report_file_open(const char *volume)
 {
+    char path[160];
+
     g_report_file = Open((CONST_STRPTR)"stressfs-conform-report.txt", MODE_NEWFILE);
+    g_report_json_file = Open((CONST_STRPTR)"stressfs-conform-report.json", MODE_NEWFILE);
+
+    if (volume != NULL && volume[0] != '\0') {
+        path_join(path, sizeof(path), volume, NULL, "stressfs-conform-report.txt");
+        g_report_file_vol = Open((CONST_STRPTR)path, MODE_NEWFILE);
+
+        path_join(path, sizeof(path), volume, NULL, "stressfs-conform-report.json");
+        g_report_json_file_vol = Open((CONST_STRPTR)path, MODE_NEWFILE);
+    }
 }
 
 static void report_file_close(void)
@@ -857,6 +944,18 @@ static void report_file_close(void)
     if (g_report_file != 0) {
         Close(g_report_file);
         g_report_file = 0;
+    }
+    if (g_report_json_file != 0) {
+        Close(g_report_json_file);
+        g_report_json_file = 0;
+    }
+    if (g_report_file_vol != 0) {
+        Close(g_report_file_vol);
+        g_report_file_vol = 0;
+    }
+    if (g_report_json_file_vol != 0) {
+        Close(g_report_json_file_vol);
+        g_report_json_file_vol = 0;
     }
 }
 
@@ -867,11 +966,56 @@ static void report_note(const char *s)
         FPuts(g_report_file, (CONST_STRPTR)s);
         FPuts(g_report_file, (CONST_STRPTR)"\n");
     }
+    if (g_report_file_vol != 0) {
+        FPuts(g_report_file_vol, (CONST_STRPTR)s);
+        FPuts(g_report_file_vol, (CONST_STRPTR)"\n");
+    }
 }
 
-int stressfs_conform_run(const char *volume, int selftest_hang)
+/* Emits the run-identity header to both channels, per the dual-output
+ * decision above. Asserts stressfs_run_identity_is_complete() before
+ * even trying -- "a report line missing any of these is a harness bug
+ * by definition" (docs/proposal.md), and the task instruction asks for
+ * this defensively on the Amiga side too, not just in the portable
+ * formatter's own 0/1 return contract. A failed assert() here means a
+ * real bug in THIS function (a mandatory field this file forgot to
+ * set), never an environment that merely couldn't answer
+ * ACTION_DISK_INFO -- see report.h's top comment for why geometry/
+ * DosEnvec are deliberately excluded from this check. */
+static void emit_run_identity(const stressfs_run_identity_t *id)
+{
+    char human[768];
+    char json[1024];
+
+    assert(stressfs_run_identity_is_complete(id));
+
+    stressfs_report_format_header_human(human, sizeof(human), id);
+    Printf((CONST_STRPTR)"%s\n", (CONST_STRPTR)human);
+    if (g_report_file != 0) {
+        FPuts(g_report_file, (CONST_STRPTR)human);
+        FPuts(g_report_file, (CONST_STRPTR)"\n");
+    }
+    if (g_report_file_vol != 0) {
+        FPuts(g_report_file_vol, (CONST_STRPTR)human);
+        FPuts(g_report_file_vol, (CONST_STRPTR)"\n");
+    }
+
+    stressfs_report_format_header_json(json, sizeof(json), id);
+    if (g_report_json_file != 0) {
+        FPuts(g_report_json_file, (CONST_STRPTR)json);
+        FPuts(g_report_json_file, (CONST_STRPTR)"\n");
+    }
+    if (g_report_json_file_vol != 0) {
+        FPuts(g_report_json_file_vol, (CONST_STRPTR)json);
+        FPuts(g_report_json_file_vol, (CONST_STRPTR)"\n");
+    }
+}
+
+int stressfs_conform_run(const char *volume, const char *tier, long seed, int selftest_hang)
 {
     stressfs_handler_info_t info;
+    stressfs_dosenvec_t envec;
+    stressfs_run_identity_t ident;
     int dos_version;
     int saw_fail = 0;
     int saw_inconclusive = 0;
@@ -885,7 +1029,7 @@ int stressfs_conform_run(const char *volume, int selftest_hang)
     if (selftest_hang) {
         int hung;
         char line[256];
-        report_file_open();
+        report_file_open(volume);
         hung = stressfs_watchdog_selftest(3);
         snprintf(line, sizeof(line),
                  "%-12s oracle=%-11s section=%-48s  watchdog self-test (stub MsgPort, 3s deadline): %s",
@@ -895,28 +1039,105 @@ int stressfs_conform_run(const char *volume, int selftest_hang)
         report_note(line);
         report_file_close();
         stressfs_watchdog_close();
-        return hung ? RETURN_WARN : RETURN_FAIL;
+        return hung ? RETURN_ERROR : RETURN_FAIL;
     }
 
-    report_file_open();
+    report_file_open(volume);
 
     dos_version = stressfs_dos_version();
 
+    stressfs_identify_handler(volume, &info, STRESSFS_WATCHDOG_SECS);
+    stressfs_fetch_dosenvec(volume, &envec);
+
+    /* Assemble the run-identity header (M2 step 1). handler_name/
+     * handler_version always get a non-empty placeholder even when
+     * identification failed, per report.h's top comment: not knowing
+     * WHETHER you identified the handler is fine to report, silently
+     * emitting an empty field is not.
+     *
+     * Finding made while proving this milestone against a real FFS
+     * handler under Copperline: info.dos_type[0] (the DosList volume
+     * entry's dol_misc.dol_volume.dol_DiskType, per handler_id.h's
+     * design) came back zero/unset even though the SAME handler
+     * answered ACTION_DISK_INFO's id_DiskType correctly a moment
+     * later (see the geometry fields below) -- i.e. this real
+     * handler simply does not populate the DosList-level DosType
+     * field the way the proposal's "DosType from the DosList entry"
+     * wording assumes every handler does. handler_id.c's own
+     * identification logic is left exactly as M1 built it (per this
+     * milestone's instruction not to re-derive it), so the fallback
+     * text below distinguishes "identification succeeded but this
+     * field happened to be empty" from "identification failed
+     * entirely" -- the two are different findings and "(unidentified)"
+     * must not be reused for both, or a reader would wrongly conclude
+     * the whole safe-probing ladder failed when in fact only one
+     * optional field was unavailable. This is exactly the kind of
+     * handler behaviour difference the quirks file (M3) exists to
+     * record once it lands. */
+    memset(&ident, 0, sizeof(ident));
+    ident.harness_version = STRESSFS_VERSION;
+    if (!info.identified) {
+        ident.handler_name = "(unidentified)";
+    } else if (info.dos_type[0]) {
+        ident.handler_name = info.dos_type;
+    } else {
+        ident.handler_name = "(identified handler; DosList DosType field empty)";
+    }
+    ident.handler_version = info.identified
+        ? (info.version[0] ? info.version : "(no $VER: string found)")
+        : "(unidentified)";
+    ident.tier = (tier != NULL && tier[0] != '\0') ? tier : "unknown";
+    ident.seed = seed;
+    ident.seed_set = 1; /* SEED always has a defined value (default 0) once
+                          * we get here -- see main.c's ReadArgs handling. */
+    ident.dos_version = dos_version;
+
     {
-        char hdr[160];
-        snprintf(hdr, sizeof(hdr), "stressfs conform: volume=%s dos.library-version=%ld",
-                 volume, (long)dos_version);
-        report_note(hdr);
+        /* ACTION_DISK_INFO against the volume's handler port doubles as
+         * this run's "volume geometry" source (the implementation
+         * plan explicitly names ACTION_DISK_INFO as the precedent to
+         * build the geometry fetch from). Sent watched-by-outer-script
+         * like every other table entry would be, via the same send()
+         * helper the table itself uses -- but this call happens before
+         * g_env exists, so it is spelled out directly here rather than
+         * reusing run_disk_info(), which expects g_env to be set up. */
+        struct InfoData diskinfo;
+        memset(&diskinfo, 0, sizeof(diskinfo));
+        if (info.port != NULL) {
+            stressfs_pkt_result_t r = stressfs_dopkt(info.port, ACTION_DISK_INFO,
+                                                       (LONG)MKBADDR(&diskinfo), 0, 0, 0, 0);
+            if (r.res1 != 0) {
+                ident.have_geometry = 1;
+                ident.geom_numblocks = diskinfo.id_NumBlocks;
+                ident.geom_numblocksused = diskinfo.id_NumBlocksUsed;
+                ident.geom_bytesperblock = diskinfo.id_BytesPerBlock;
+                ident.geom_disktype = diskinfo.id_DiskType;
+            }
+        }
     }
 
-    stressfs_identify_handler(volume, &info, STRESSFS_WATCHDOG_SECS);
-    if (info.identified) {
-        char hdr[160];
-        snprintf(hdr, sizeof(hdr), "stressfs conform: handler identified: DosType=\"%s\" version=\"%s\"",
-                 info.dos_type[0] ? info.dos_type : "?",
-                 info.version[0] ? info.version : "(no $VER: string found)");
-        report_note(hdr);
-    } else {
+    if (envec.have_envec) {
+        ident.have_envec = 1;
+        ident.de_tablesize = envec.de_tablesize;
+        ident.de_sizeblock = envec.de_sizeblock;
+        ident.de_surfaces = envec.de_surfaces;
+        ident.de_sectorperblock = envec.de_sectorperblock;
+        ident.de_blockspertrack = envec.de_blockspertrack;
+        ident.de_reserved = envec.de_reserved;
+        ident.de_prealloc = envec.de_prealloc;
+        ident.de_interleave = envec.de_interleave;
+        ident.de_lowcyl = envec.de_lowcyl;
+        ident.de_highcyl = envec.de_highcyl;
+        ident.de_numbuffers = envec.de_numbuffers;
+        ident.de_maxtransfer = envec.de_maxtransfer;
+        ident.de_mask = envec.de_mask;
+        ident.de_bootpri = envec.de_bootpri;
+        ident.de_dostype = envec.de_dostype;
+    }
+
+    emit_run_identity(&ident);
+
+    if (!info.identified) {
         char hdr[160];
         snprintf(hdr, sizeof(hdr),
                  "stressfs conform: handler NOT identified for volume \"%s\" -- "
@@ -989,6 +1210,7 @@ int stressfs_conform_run(const char *volume, int selftest_hang)
             report_note("stressfs conform: ABORTING -- a packet watchdog deadline fired. "
                         "No further packets will be sent to this handler; the volume is left "
                         "untouched (fixture teardown skipped deliberately).");
+            saw_inconclusive = 1;
         } else if (info.identified) {
             fixture_teardown(&g_env);
         }
@@ -997,8 +1219,10 @@ int stressfs_conform_run(const char *volume, int selftest_hang)
     stressfs_watchdog_close();
     report_file_close();
 
+    /* M2 exit-code priority: inconclusive beats fail beats pass -- see
+     * conform_run.h's header comment for the full scheme. */
     if (saw_inconclusive) {
-        return RETURN_WARN + 1; /* distinct from a plain fail, see conform_run.h */
+        return RETURN_ERROR;
     }
     if (saw_fail) {
         return RETURN_WARN;

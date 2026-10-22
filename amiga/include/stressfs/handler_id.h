@@ -41,6 +41,30 @@ typedef struct {
     int identified;            /* nonzero iff `port` is usable at all */
 } stressfs_handler_info_t;
 
+/* M2: the DosEnvec fields stressfs_fetch_dosenvec() (below) can supply
+ * for the run-identity header. Field selection and the
+ * have_envec/"unavailable" convention are documented in
+ * stressfs/report.h's top comment -- this struct's fields map
+ * directly onto stressfs_run_identity_t's de_* fields there. */
+typedef struct {
+    int have_envec;
+    unsigned long de_tablesize;
+    unsigned long de_sizeblock;
+    unsigned long de_surfaces;
+    unsigned long de_sectorperblock;
+    unsigned long de_blockspertrack;
+    unsigned long de_reserved;
+    unsigned long de_prealloc;
+    unsigned long de_interleave;
+    unsigned long de_lowcyl;
+    unsigned long de_highcyl;
+    unsigned long de_numbuffers;
+    unsigned long de_maxtransfer;
+    unsigned long de_mask;
+    long          de_bootpri;
+    unsigned long de_dostype;
+} stressfs_dosenvec_t;
+
 /* The running system's dos.library version (e.g. 37, 40, 47) --
  * always available once dos.library is open at all, which M0 already
  * established happens unconditionally. Returns 0 only if dos.library
@@ -59,6 +83,22 @@ int stressfs_dos_version(void);
 void stressfs_identify_handler(const char *volume_name,
                                 stressfs_handler_info_t *info,
                                 unsigned timeout_secs);
+
+/* M2 (docs/implementation-plan.md step 1): the proposal's "volume
+ * geometry and DosEnvec" run-identity field. DosEnvec
+ * (dos/filehandler.h) is not reachable from any packet reply -- it
+ * lives on the mounting DEVICE node's FileSysStartupMsg
+ * (dol_misc.dol_handler.dol_Startup, a BPTR to struct
+ * FileSysStartupMsg whose fssm_Environ is in turn a BPTR to the
+ * DosEnvec table itself), found the same way
+ * stressfs_identify_handler() already finds the device node to read
+ * dol_SegList from (match dol_Task against the volume's handler
+ * port). Fills every field in `out` to 0 and `out->have_envec = 0` if
+ * the device node, its startup message, or its environ table cannot
+ * be found -- this is a legitimate "unavailable" case, not a harness
+ * bug (see report.h's top comment), so the caller reports it as such
+ * rather than failing the whole run. */
+void stressfs_fetch_dosenvec(const char *volume_name, stressfs_dosenvec_t *out);
 
 #ifdef __cplusplus
 }

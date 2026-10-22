@@ -142,6 +142,22 @@ void stressfs_conform_format_line(char *buf, size_t bufsz,
                                    stressfs_verdict_t verdict,
                                    stressfs_pkt_result_t got);
 
+/* M2: the machine-readable twin of stressfs_conform_format_line(),
+ * living alongside it per this header's top comment -- M1 deliberately
+ * split evaluate()/format_line() apart so M2 could add this without
+ * touching either. One JSON object per line (no trailing newline;
+ * same convention as format_line above), schema stable from M2
+ * onward: verdict, oracle class, manual section, test name, the raw
+ * dp_Res1/dp_Res2 pair, and `applied_quirks` -- always an empty array
+ * at M2 (M3 is what populates it; the field exists now so the schema
+ * never changes shape later, per the task's forward-reference
+ * instruction). Truncates into `buf`/`bufsz` like every other
+ * formatter here; never crashes on a NULL entry or a too-small buffer. */
+void stressfs_conform_format_json(char *buf, size_t bufsz,
+                                   const stressfs_test_entry_t *entry,
+                                   stressfs_verdict_t verdict,
+                                   stressfs_pkt_result_t got);
+
 /* Stable, short strings for each verdict/oracle value, used by both
  * the formatter above and anything else (host tests, a future M2
  * summariser) that wants the canonical spelling. */

@@ -12,6 +12,14 @@ name: CI
 # volume is intentionally NOT in CI (it needs a personal/licensed
 # Kickstart ROM + HDF this repo cannot ship); run ci/copperline-m1.sh
 # locally instead, same precedent as ci/copperline-m0.sh.
+#
+# M2 — Report format + verdict/oracle machinery (same section):
+# host-test now also runs report_test (the golden-file-validated
+# writer tests); volamos-smoke additionally runs ci/report-checker.sh
+# against the JSON-lines report the volamos conform run just produced
+# ("the seed of phase 4's summariser"). Copperline coverage of the new
+# run-identity header and JSON lines is, as with M1, a local-only
+# script (ci/copperline-m2.sh) for the same licensed-assets reason.
 
 on:
   push:
@@ -133,23 +141,40 @@ jobs:
       # about volamos's fidelity (docs/implementation-plan.md section
       # 5's "volamos tier fidelity" risk), not a harness bug. The gate
       # is "ran to completion without volamos reporting an unhandled
-      # library call", checked via the exit code: stressfs itself
-      # returns RETURN_OK(0)/RETURN_WARN(5) for a completed run (pass
-      # or fail verdicts) and a distinct code for a harness-detected
-      # inconclusive; volamos's own process exit code is whatever
-      # stressfs returned, so anything in 0-6 here means the run
-      # completed and this step should not fail CI on it.
+      # library call", checked via the exit code: stressfs itself uses
+      # the M2 exit-code scheme documented in
+      # amiga/include/stressfs/conform_run.h -- RETURN_OK(0) all pass,
+      # RETURN_WARN(5) at least one fail, RETURN_ERROR(10) at least one
+      # inconclusive, RETURN_FAIL(20) could not even start. All four are
+      # "the run completed and reported something", which is this job's
+      # bar; volamos's own process exit code is whatever stressfs
+      # returned, so anything in 0-20 here means the run completed and
+      # this step should not fail CI on it.
       - name: Run stressfs conform under volamos
         run: |
           mkdir -p /tmp/stressfs-conform-work
           set +e
           volamos --cpu 68020 -V WORK:/tmp/stressfs-conform-work \
-            build-m68k/stressfs VOLUME WORK: CONFORM
+            build-m68k/stressfs VOLUME WORK: TIER volamos SEED 1 CONFORM
           rc=$?
           set -e
           echo "stressfs conform exit code under volamos: $rc"
-          if [ "$rc" -gt 6 ]; then
-            echo "::error::stressfs conform under volamos exited $rc (expected 0-6: it should" \
+          if [ "$rc" -gt 20 ]; then
+            echo "::error::stressfs conform under volamos exited $rc (expected 0-20: it should" \
                  "complete the run, not crash or hang)"
             exit 1
           fi
+
+      # M2 (docs/implementation-plan.md section 3's M2 entry): parse the
+      # JSON-lines report this run just produced and print verdict
+      # counts -- "the seed of phase 4's summariser," run here against a
+      # real (volamos-produced) report because volamos output needs no
+      # licensed/personal assets, unlike the Copperline tier.
+      - name: Check the JSON report with ci/report-checker.sh
+        # The report file lands under the volamos -V mapping above
+        # (/tmp/stressfs-conform-work), not build-m68k/ -- see
+        # amiga/src/conform.c's report_file_open() comment for why
+        # only a path under an explicitly `-V`-mapped assign gets real
+        # host-backed I/O under volamos (relative paths, RAM: and T:
+        # are faked there and never touch the host filesystem).
+        run: ci/report-checker.sh /tmp/stressfs-conform-work/stressfs-conform-report.json
