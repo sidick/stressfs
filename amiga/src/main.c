@@ -76,6 +76,8 @@
 
 #include "stressfs/prng.h"
 #include "stressfs/conform_run.h"
+#include "stressfs/random_run.h"
+#include "stressfs/replay.h"
 
 /* M1 (docs/implementation-plan.md): CONFORM now dispatches to the real
  * table-driven engine (amiga/src/conform.c) instead of being echoed
@@ -119,9 +121,29 @@
  *                     `-k` option for it to collide with, since the
  *                     force list is spelled FORCEQUIRK).
  */
+/* M4 (docs/implementation-plan.md M4 entry) adds:
+ *
+ *   RANDOM/S            -- now actually dispatches (was parsed-but-unused
+ *                           since M0).
+ *   OPS/N/K             -- how many operations `random` generates and
+ *                           applies; see random_run.h's header comment
+ *                           for the default.
+ *   VERIFYN/N/K         -- how often (in steps) `random` runs a
+ *                           full-tree compare on top of its per-step
+ *                           checks; see random_run.h.
+ *   RANDOMBREAKMODEL/S  -- the M4 self-test switch, mirroring M1's
+ *                           SELFTESTHANG: deliberately corrupts one
+ *                           step's model expectation to demonstrate
+ *                           divergence detection end to end.
+ *   REPLAY/S            -- selects `stressfs replay` instead of
+ *                           `random`/`conform`.
+ *   REPLAYLOG/K         -- the JSON-lines report to replay (see
+ *                           stressfs/replay.h).
+ */
 #define STRESSFS_TEMPLATE \
     "CONFORM/S,RANDOM/S,SEED/N/K,VOLUME/K,TIER/K,SELFTESTHANG/S," \
-    "QUIRKS/K,FORCEQUIRK/K,NOQUIRKS=-K/S"
+    "QUIRKS/K,FORCEQUIRK/K,NOQUIRKS=-K/S," \
+    "OPS/N/K,VERIFYN/N/K,RANDOMBREAKMODEL/S,REPLAY/S,REPLAYLOG/K"
 #define STRESSFS_DOS_VERSION 37L /* V37 = AmigaOS 2.04, this project's floor */
 
 /* ReadArgs() argument slots, in template order. */
@@ -135,6 +157,11 @@ enum {
     ARG_QUIRKS,
     ARG_FORCEQUIRK,
     ARG_NOQUIRKS,
+    ARG_OPS,
+    ARG_VERIFYN,
+    ARG_RANDOMBREAKMODEL,
+    ARG_REPLAY,
+    ARG_REPLAYLOG,
     ARG_COUNT
 };
 
@@ -202,6 +229,27 @@ int main(void)
                                    (const char *)args[ARG_QUIRKS],
                                    (const char *)args[ARG_FORCEQUIRK],
                                    args[ARG_NOQUIRKS] != 0);
+        FreeArgs(rdargs);
+        return rc;
+    }
+
+    /* M4: REPLAY takes priority over RANDOM if both are somehow given
+     * (ReadArgs allows it; there is no sensible "both" case, and
+     * REPLAY winning is the safer default -- it never invents a fresh
+     * random stream, only re-runs one already on disk). */
+    if (args[ARG_REPLAY] != 0) {
+        rc = stressfs_replay_run((const char *)args[ARG_REPLAYLOG],
+                                  (const char *)volume, (const char *)tier);
+        FreeArgs(rdargs);
+        return rc;
+    }
+
+    if (args[ARG_RANDOM] != 0) {
+        long ops = (args[ARG_OPS] != 0) ? *(LONG *)args[ARG_OPS] : 0;
+        long verify_every = (args[ARG_VERIFYN] != 0) ? *(LONG *)args[ARG_VERIFYN] : 0;
+        rc = stressfs_random_run((const char *)volume, (const char *)tier, seed,
+                                  ops, verify_every,
+                                  args[ARG_RANDOMBREAKMODEL] != 0, 0);
         FreeArgs(rdargs);
         return rc;
     }

@@ -68,8 +68,13 @@ extern "C" {
  * answerable from the version string alone without consulting git
  * history. Bump the mN suffix whenever a future milestone changes the
  * JSON schema (new field, renamed field, etc.), bump MINOR for new
- * non-schema-breaking fields, PATCH for anything else. */
-#define STRESSFS_VERSION "0.1.0-m3"
+ * non-schema-breaking fields, PATCH for anything else. M4 added the
+ * `random_step` line type (stressfs_report_format_step_json()) -- a
+ * new, additive JSON object type, not a change to any existing one,
+ * but still a schema addition worth a version bump so a consumer can
+ * tell "this report may contain random_step lines" from the version
+ * string alone. */
+#define STRESSFS_VERSION "0.1.0-m4"
 
 /* One run's identity, per docs/proposal.md's "Reproducibility rules".
  * All string fields are non-owning pointers; the caller (amiga/src/
@@ -183,6 +188,48 @@ void stressfs_report_format_quirks_human(char *buf, size_t bufsz,
 void stressfs_report_format_quirks_json(char *buf, size_t bufsz,
                                          const stressfs_quirks_db_t *db,
                                          const stressfs_quirk_identity_t *ident);
+
+/* ------------------------------------------------------------------ */
+/* M4: the per-step report line for `stressfs random`.                 */
+/* ------------------------------------------------------------------ */
+
+/* The proposal's layer-2 "apply an operation to the real volume and to
+ * an in-memory model, and compare after every step" (docs/proposal.md,
+ * "Layer 2: random operations against a model") is the random engine's
+ * equivalent of a conform "test" -- one line per step, same verdict
+ * vocabulary (M4 only ever emits `pass`, `fail`, or `inconclusive`;
+ * `deviation`/`unsupported` are unused here since M4 has no quirks
+ * integration yet, see random_model.h's top comment on that) and the
+ * same oracle vocabulary (always STRESSFS_ORACLE_MODEL -- M4 is
+ * "portable model only" by the plan's own title). Kept as its own
+ * struct/pair of formatters rather than reusing
+ * stressfs_test_entry_t/stressfs_conform_format_*() because a random
+ * step has no static table entry behind it (it is generated, not
+ * declared) and carries fields (the generated op's own description,
+ * the EXPECTED vs. ACTUAL pair rather than a fixed expectation) a
+ * conform line has no use for -- see this header's own top comment on
+ * extending rather than duplicating report.h's machinery: the pieces
+ * actually shared (JSON escaping, the run-identity header, the verdict
+ * strings via stressfs_verdict_name()) are reused as-is; only the
+ * per-line shape is new. */
+typedef struct {
+    long step;
+    const char *op_kind;          /* stressfs_op_kind_name() */
+    const char *detail;            /* short human description of the operation and its target(s) */
+    long real_res1;
+    long real_res2;
+    long expect_res1;
+    long expect_res2;
+    int  expect_res1_any;
+    int  expect_res2_any;
+    int  diverged;                 /* nonzero: the step disagreed with the model in some way */
+    const char *diverge_reason;    /* human text explaining the divergence; "" when !diverged */
+} stressfs_random_step_t;
+
+void stressfs_report_format_step_human(char *buf, size_t bufsz,
+                                        const stressfs_random_step_t *s);
+void stressfs_report_format_step_json(char *buf, size_t bufsz,
+                                       const stressfs_random_step_t *s);
 
 /* Appends `src`, JSON-string-escaped (backslash, double-quote and
  * control characters per RFC 8259; stressfs never needs to emit

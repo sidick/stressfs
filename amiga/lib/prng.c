@@ -17,15 +17,24 @@ static uint32_t rotl(uint32_t x, int k)
     return (x << k) | (x >> (32 - k));
 }
 
+/* The SplitMix32 finalizer (mixing step), factored out so M4's
+ * stressfs_prng_hash3() below can reuse it directly instead of
+ * inventing a second mixing function -- see prng.h's header comment on
+ * stressfs_prng_hash3(). */
+static uint32_t mix32(uint32_t z)
+{
+    z = (z ^ (z >> 16)) * 0x85EBCA6Bu;
+    z = (z ^ (z >> 13)) * 0xC2B2AE35u;
+    return z ^ (z >> 16);
+}
+
 /* SplitMix32: a simple, well-mixed counter-based generator used only to
  * expand the caller's 32-bit seed into xoshiro128**'s four-word state.
  * `state` is both the running counter and is updated in place. */
 static uint32_t splitmix32_next(uint32_t *state)
 {
-    uint32_t z = (*state += 0x9E3779B9u);
-    z = (z ^ (z >> 16)) * 0x85EBCA6Bu;
-    z = (z ^ (z >> 13)) * 0xC2B2AE35u;
-    return z ^ (z >> 16);
+    *state += 0x9E3779B9u;
+    return mix32(*state);
 }
 
 void stressfs_prng_seed(stressfs_prng_t *prng, uint32_t seed)
@@ -82,4 +91,12 @@ uint32_t stressfs_prng_below(stressfs_prng_t *prng, uint32_t bound)
             }
         }
     }
+}
+
+uint32_t stressfs_prng_hash3(uint32_t a, uint32_t b, uint32_t c)
+{
+    uint32_t h = mix32(a);
+    h = mix32(h ^ b);
+    h = mix32(h ^ c);
+    return h;
 }

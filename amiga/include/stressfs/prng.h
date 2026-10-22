@@ -55,6 +55,21 @@ uint32_t stressfs_prng_next(stressfs_prng_t *prng);
  * evenly divide 2^32. */
 uint32_t stressfs_prng_below(stressfs_prng_t *prng, uint32_t bound);
 
+/* M4 (docs/implementation-plan.md): a direct, O(1), stateless hash of
+ * three 32-bit inputs, built from the same SplitMix32 finalizer
+ * prng.c's seeding step already uses. This is NOT the stream generator
+ * above -- stressfs_prng_next() only runs forward one step at a time,
+ * so it cannot answer "what is byte N of this file's content" without
+ * replaying N steps, which is exactly the "stored" cost
+ * docs/proposal.md's layer 2 rules out ("content generated from the
+ * seed and offset rather than stored"). stressfs_prng_hash3() answers
+ * that in one call: `random`'s model keys it with (run seed, a file's
+ * stable id, byte offset / 4) to get that file's expected content at
+ * any offset without ever holding the bytes in memory. Reusing the
+ * existing mixing math here (rather than adding a second algorithm) is
+ * a deliberate M4 decision -- see amiga/include/stressfs/random_model.h. */
+uint32_t stressfs_prng_hash3(uint32_t a, uint32_t b, uint32_t c);
+
 #ifdef __cplusplus
 }
 #endif

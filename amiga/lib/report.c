@@ -375,3 +375,78 @@ void stressfs_report_format_quirks_json(char *buf, size_t bufsz,
 
     append(buf, bufsz, "],\"active_count\":%d}", n_active);
 }
+
+/* ------------------------------------------------------------------ */
+/* M4: the per-step report line for `stressfs random`.                 */
+/* ------------------------------------------------------------------ */
+
+void stressfs_report_format_step_human(char *buf, size_t bufsz,
+                                        const stressfs_random_step_t *s)
+{
+    if (buf == NULL || bufsz == 0) {
+        return;
+    }
+    buf[0] = '\0';
+    if (s == NULL) {
+        append(buf, bufsz, "inconclusive  step=? (NULL step)");
+        return;
+    }
+
+    append(buf, bufsz, "%-12s step=%-6ld op=%-8s real=(%ld,%ld) expect=(",
+           s->diverged ? "fail" : "pass", s->step,
+           s->op_kind != NULL ? s->op_kind : "?",
+           s->real_res1, s->real_res2);
+    if (s->expect_res1_any) {
+        append(buf, bufsz, "*,");
+    } else {
+        append(buf, bufsz, "%ld,", s->expect_res1);
+    }
+    if (s->expect_res2_any) {
+        append(buf, bufsz, "*)");
+    } else {
+        append(buf, bufsz, "%ld)", s->expect_res2);
+    }
+    append(buf, bufsz, "  %s", s->detail != NULL ? s->detail : "");
+    if (s->diverged) {
+        append(buf, bufsz, "  [DIVERGED: %s]",
+               s->diverge_reason != NULL ? s->diverge_reason : "?");
+    }
+}
+
+void stressfs_report_format_step_json(char *buf, size_t bufsz,
+                                       const stressfs_random_step_t *s)
+{
+    if (buf == NULL || bufsz == 0) {
+        return;
+    }
+    buf[0] = '\0';
+    if (s == NULL) {
+        append(buf, bufsz, "{\"type\":\"harness_bug\",\"reason\":\"NULL step\"}");
+        return;
+    }
+
+    append(buf, bufsz,
+           "{\"type\":\"random_step\",\"verdict\":\"%s\",\"oracle\":\"model\",\"step\":%ld,"
+           "\"op\":\"",
+           s->diverged ? "fail" : "pass", s->step);
+    stressfs_json_escape_append(buf, bufsz, s->op_kind != NULL ? s->op_kind : "?");
+    append(buf, bufsz, "\",\"detail\":\"");
+    stressfs_json_escape_append(buf, bufsz, s->detail != NULL ? s->detail : "");
+    append(buf, bufsz, "\",\"real_res1\":%ld,\"real_res2\":%ld,", s->real_res1, s->real_res2);
+
+    if (s->expect_res1_any) {
+        append(buf, bufsz, "\"expect_res1\":null,");
+    } else {
+        append(buf, bufsz, "\"expect_res1\":%ld,", s->expect_res1);
+    }
+    if (s->expect_res2_any) {
+        append(buf, bufsz, "\"expect_res2\":null,");
+    } else {
+        append(buf, bufsz, "\"expect_res2\":%ld,", s->expect_res2);
+    }
+
+    append(buf, bufsz, "\"diverged\":%s,\"diverge_reason\":\"",
+           s->diverged ? "true" : "false");
+    stressfs_json_escape_append(buf, bufsz, s->diverge_reason != NULL ? s->diverge_reason : "");
+    append(buf, bufsz, "\"}");
+}

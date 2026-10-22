@@ -27,6 +27,20 @@ name: CI
 # stays a local script, ci/copperline-m3.sh, like the M0-M2 Copperline
 # scripts before it.
 #
+# M4 — `stressfs random`, portable model only (same section): host-test
+# also runs random_test (generator determinism, model logic including
+# fold-insensitive names and the content oracle, and a host-simulated
+# divergence-detection self-test); volamos-smoke additionally runs
+# `stressfs random` twice with the same seed and diffs the two JSON
+# reports byte-for-byte (the "SEED=n reproduces the identical operation
+# stream ... under volamos" exit criterion), then runs
+# RANDOMBREAKMODEL and confirms the deliberately-wrong expectation is
+# reported as a divergence. The >= 10000-operation run against real
+# FFS V47, and the same SEED-determinism check under Copperline, need
+# a licensed Kickstart ROM + HDF this repo cannot ship and so stay a
+# local script, ci/copperline-m4.sh, like the M0-M3 Copperline scripts
+# before it.
+#
 # M2 — Report format + verdict/oracle machinery (same section):
 # host-test now also runs report_test (the golden-file-validated
 # writer tests); volamos-smoke additionally runs ci/report-checker.sh
@@ -265,3 +279,61 @@ jobs:
         # host-backed I/O under volamos (relative paths, RAM: and T:
         # are faked there and never touch the host filesystem).
         run: ci/report-checker.sh /tmp/stressfs-conform-work/stressfs-conform-report.json
+
+      # M4 (docs/implementation-plan.md M4 entry): "SEED=n reproduces
+      # the identical operation stream ... under volamos" -- run
+      # `stressfs random` twice with the same seed against a volamos
+      # volume and diff the two JSON-lines reports byte-for-byte.
+      # volamos only implements DoPkt() for a handful of packet types
+      # (see amiga/src/conform.c's own header comment on this), so
+      # most of the file-operation wrapper calls `random` makes here
+      # legitimately fail against it -- that is fine and expected: the
+      # determinism property under test is about the GENERATOR
+      # reproducing the same stream and the same comparisons, not
+      # about volamos behaving like a real handler (which is exactly
+      # why the real >= 10000-op FFS run is Copperline's job, in
+      # ci/copperline-m4.sh, not this one's).
+      - name: Prove SEED determinism of `stressfs random` under volamos
+        run: |
+          set -eu
+          mkdir -p /tmp/stressfs-random-work-a /tmp/stressfs-random-work-b
+
+          volamos --cpu 68020 -V WORK:/tmp/stressfs-random-work-a \
+            build-m68k/stressfs VOLUME WORK: TIER volamos SEED 42 RANDOM OPS 200 || true
+          volamos --cpu 68020 -V WORK:/tmp/stressfs-random-work-b \
+            build-m68k/stressfs VOLUME WORK: TIER volamos SEED 42 RANDOM OPS 200 || true
+
+          A=/tmp/stressfs-random-work-a/stressfs-random-report.json
+          B=/tmp/stressfs-random-work-b/stressfs-random-report.json
+          if [ ! -f "$A" ] || [ ! -f "$B" ]; then
+            echo "::error::one or both SEED=42 runs produced no JSON report" >&2
+            exit 1
+          fi
+          if ! diff -q "$A" "$B" >/dev/null; then
+            echo "::error::two runs with the same SEED produced DIFFERENT reports" >&2
+            diff "$A" "$B" | head -20 >&2
+            exit 1
+          fi
+          echo "OK: SEED=42 reproduced the identical operation stream across two volamos runs"
+
+      # M4: the self-test switch, mirroring M1's SELFTESTHANG
+      # demonstration under volamos -- a deliberately corrupted model
+      # expectation must be reported as a divergence end to end.
+      - name: Prove divergence detection with RANDOMBREAKMODEL under volamos
+        run: |
+          set -eu
+          mkdir -p /tmp/stressfs-random-selftest
+          set +e
+          volamos --cpu 68020 -V WORK:/tmp/stressfs-random-selftest \
+            build-m68k/stressfs VOLUME WORK: TIER volamos SEED 1 RANDOM RANDOMBREAKMODEL
+          rc=$?
+          set -e
+          echo "RANDOMBREAKMODEL exit code: $rc"
+          if [ "$rc" != 10 ]; then
+            echo "::error::RANDOMBREAKMODEL should exit RETURN_ERROR (10) when the divergence" \
+                 "is correctly detected, got $rc" >&2
+            exit 1
+          fi
+          grep -q '"diverged":true' /tmp/stressfs-random-selftest/stressfs-random-report.json \
+            || { echo "::error::no diverged:true line in the self-test report"; exit 1; }
+          echo "OK: the deliberately corrupted expectation was reported as a divergence"

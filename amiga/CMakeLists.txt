@@ -48,6 +48,8 @@ add_library(stressfs-lib STATIC
   lib/conform.c
   lib/report.c
   lib/quirks.c
+  lib/random_ops.c
+  lib/random_model.c
 )
 
 target_include_directories(stressfs-lib PUBLIC include)
@@ -70,6 +72,8 @@ if(CMAKE_CROSSCOMPILING)
     src/handler_id.c
     src/conform.c
     src/quirks_file.c
+    src/random.c
+    src/replay.c
   )
   target_link_libraries(stressfs PRIVATE stressfs-lib)
 endif()
@@ -142,4 +146,18 @@ if(NOT CMAKE_CROSSCOMPILING)
   endif()
 
   add_test(NAME quirks_test COMMAND quirks_test)
+
+  # M4: the generator/model host unit tests (docs/implementation-plan.md
+  # M4 exit criterion -- generator determinism on the host, model logic,
+  # and the divergence-detection self-test).
+  add_executable(random_test tests/random_test.c)
+  target_link_libraries(random_test PRIVATE stressfs-lib)
+  target_compile_options(random_test PRIVATE -Wall -Wextra -Werror)
+
+  if(STRESSFS_SANITIZERS)
+    target_compile_options(random_test PRIVATE -fsanitize=address,undefined -g)
+    target_link_options(random_test PRIVATE -fsanitize=address,undefined)
+  endif()
+
+  add_test(NAME random_test COMMAND random_test)
 endif()
