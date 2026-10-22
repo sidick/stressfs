@@ -7,13 +7,13 @@ expands phase 1 ("Prove the harness") into executable milestones. Everything her
 revisable, but build to these decisions until a reason appears.
 
 **Toolchain decision (fixed):** stressfs uses the exact same compiler and build setup as
-the Phoenix repo (`~/src/unnamed-fs`): the pinned public `amigadev/crosstools` Docker
+the sibling handler repo (`~/src/unnamed-fs`): the pinned public `amigadev/crosstools` Docker
 image (`docker.io/amigadev/crosstools:m68k-amigaos-gcc10`, pinned by digest
 `sha256:3120749ec13b18a8f52e6073a484463f46751d69d8a67eaae10397958c05954d` — the tag says
 "gcc10" but the image actually ships `m68k-amigaos-gcc (AmigaDev) 16.2.1b`, i.e. the
 AmigaPorts/bebbo GCC 16.2 line), driven through a CMake toolchain file copied from
-Phoenix's `cmake/m68k-amigaos.toolchain.cmake` and adapted. The adaptation matters:
-Phoenix's core is a freestanding library, while `stressfs` is a **hosted CLI binary** — it
+that repo's `cmake/m68k-amigaos.toolchain.cmake` and adapted. The adaptation matters:
+that repo's core is a freestanding library, while `stressfs` is a **hosted CLI binary** — it
 links against dos.library/exec.library through the toolchain's startup objects and
 amiga.lib stubs, takes ReadArgs arguments, and prints to a console. So stressfs keeps
 `-m68020-60 -Os -noixemul -Wall -Wextra -Werror -fno-common` and `CMAKE_SYSTEM_NAME
@@ -308,14 +308,17 @@ its phase opens, informed by the phase-1 findings.
   not a parameter of the check call; host unit tests from M2 assert that each oracle type
   can only ever emit its own class, and the report writer refuses a verdict with no
   oracle attached.
-- **Copperline's disk fault policy is a cross-repo dependency that does not exist yet.**
-  Phase 5 depends on `disk.fault.set`/`clear`/`list`/`stats` landing in Copperline,
-  specified jointly with devsoak — another team/repo and the proposal's one acknowledged
-  control-protocol gap. Mitigations: the spec work (the policy language in the proposal)
-  can be circulated during phases 2–3 so implementation starts before stressfs needs it;
-  phases 1–4 are sequenced to be fully useful without it; and if it slips, a degraded
-  interim exists (power-cut-only campaigns via the existing `state.save`/`machine.reset`
-  surface, which needs nothing new) — explicitly marked as the narrow subset it is.
+- **Copperline's disk fault policy is a cross-repo dependency.** Phase 5 depends on
+  `disk.fault.set`/`clear`/`list`/`stats` landing in Copperline, specified jointly with
+  devsoak — another team/repo and the proposal's one acknowledged control-protocol gap.
+  This is now tracked as [CopperlineHQ/Copperline#809](https://github.com/CopperlineHQ/Copperline/pull/809)
+  rather than purely speculative, but it is still an open PR in another repo, not merged
+  API stressfs can build against — re-check its status and the final method/policy shape
+  against the proposal's §"The one proposal" before phase 5 starts, since a PR can still
+  change shape before landing. Mitigations: phases 1–4 are sequenced to be fully useful
+  without it; and if it slips, a degraded interim exists (power-cut-only campaigns via the
+  existing `state.save`/`machine.reset` surface, which needs nothing new) — explicitly
+  marked as the narrow subset it is.
 - **volamos tier fidelity.** Per-commit runs go through volamos's API-level emulation,
   whose packet behaviour is itself an implementation, not the manual. A conform pass
   under volamos is evidence the *harness* works, not that a handler does; the report's

@@ -2,7 +2,7 @@
 
 Oct 21, 2026 · @Simon Dick
 
-A single test harness, working name **fstest**, that shows, for a stated set of packets, OS versions and declared deviations, that an Amiga file system handler behaves as the AmigaDOS Manual says, that file contents survive the operation sequences it ran, and that the volume survives the crashes, lying drives and bit rot it injected. It is format-agnostic, so it tests Phoenix, FFS, PFS3 and SFS alike and the host crates against each other.
+A single test harness, working name **fstest**, that shows, for a stated set of packets, OS versions and declared deviations, that an Amiga file system handler behaves as the AmigaDOS Manual says, that file contents survive the operation sequences it ran, and that the volume survives the crashes, lying drives and bit rot it injected. It is format-agnostic, so it tests the new handler, FFS, PFS3 and SFS alike and the host crates against each other.
 
 ## Purpose and scope
 
@@ -26,9 +26,9 @@ Every result carries a verdict, the oracle that produced it and the coverage uni
 
 **Coverage unit for layer 1:** packet × DOS version × outcome (success or each documented error) × handler state (fresh mount, after inhibit/uninhibit, after a failed operation, with the object locked by another process, on a write-protected volume). A layer 1 report states which cells were exercised; "every DOS packet" is the target matrix, not a claim.
 
-**Oracle classes:** `independent` (the AmigaDOS Manual, or a reference handler run under amiga-fuse/volamos); `model` (the harness's in-memory expectation, portable across handlers); `correlated` (the host implementation of the same format, which shares the C core with the Phoenix handler and so can only catch environment-dependent bugs such as codegen, alignment and driver effects, not shared logic errors). Every verdict names its class.
+**Oracle classes:** `independent` (the AmigaDOS Manual, or a reference handler run under amiga-fuse/volamos); `model` (the harness's in-memory expectation, portable across handlers); `correlated` (the host implementation of the same format, which shares the C core with the new handler and so can only catch environment-dependent bugs such as codegen, alignment and driver effects, not shared logic errors). Every verdict names its class.
 
-**Durability boundary for crash tests:** data is *acknowledged* only when `ACTION_FLUSH` has returned, or, for Phoenix, when a commit has been reported through `GET_STATS` or `ACTION_FLUSH`. A successful `Write()` alone acknowledges nothing. After recovery, acknowledged data must be intact; unacknowledged data may be present or absent but never corrupt; metadata must be consistent in both cases. Each target format and tier states what `ACTION_FLUSH` promises there (FFS ≤ V40 replied before the write finished, which the quirks file records).
+**Durability boundary for crash tests:** data is *acknowledged* only when `ACTION_FLUSH` has returned, or, for the new handler, when a commit has been reported through `GET_STATS` or `ACTION_FLUSH`. A successful `Write()` alone acknowledges nothing. After recovery, acknowledged data must be intact; unacknowledged data may be present or absent but never corrupt; metadata must be consistent in both cases. Each target format and tier states what `ACTION_FLUSH` promises there (FFS ≤ V40 replied before the write finished, which the quirks file records).
 
 **What a pass does not establish:** correctness under hardware timing the campaign did not run, correctness of the block device driver (devsoak's job), resistance to faults the campaign did not inject, or soundness of the on-disk format when the only oracle was correlated.
 
@@ -40,7 +40,7 @@ One Amiga test binary runs the four layers against any mounted volume; each laye
 
 ## Layer 1: packet conformance
 
-A table-driven suite that sends every documented DOS packet by hand (`DoPkt()`), with the AmigaDOS Manual as the oracle for arguments, results, `dp_Res2` error codes and the edge cases it calls out. Nothing like it exists today, and it is useful to every handler author, not only to Phoenix.
+A table-driven suite that sends every documented DOS packet by hand (`DoPkt()`), with the AmigaDOS Manual as the oracle for arguments, results, `dp_Res2` error codes and the edge cases it calls out. Nothing like it exists today, and it is useful to every handler author, not only to the new handler.
 
 **Coverage**
 
@@ -53,7 +53,7 @@ A table-driven suite that sends every documented DOS packet by hand (`DoPkt()`),
 
 1. Establishes a baseline first: `ACTION_IS_FILESYSTEM`, `ACTION_NIL`, `ACTION_CURRENT_VOLUME`, a lock on the root and its release.
 2. Sends packets the handler may not implement only in an opt-in *probe* mode, from that baseline state, with every unused argument zeroed, and logs the packet number before sending so a crash is attributable.
-3. Never sends third-party or custom packets (PFS3, SFS, Phoenix private ranges) unless the handler's identity has been confirmed via its own capability query.
+3. Never sends third-party or custom packets (PFS3, SFS, the new handler's private ranges) unless the handler's identity has been confirmed via its own capability query.
 4. Identifies the handler before anything else: DosType from the DosList entry, the handler's version string from its segment list where present, and \`QUERY\_CAPS\` / \`ACTION\_FILESYSTEM\_ATTR\` / \`ACTION\_QUERY\_ATTR\` where answered; if identity cannot be established the suite runs only the baseline and reports the rest as unsupported. A crash or hang (watchdog timeout from a second process) marks the test inconclusive, preserves the volume image untouched, and aborts the run rather than continuing on a possibly damaged handler. Keeps a per-handler quirks file in the same format and with the same semantics as devsoak.quirks: match conditions (handler name, version range, Kickstart version), actions (skip a packet, downgrade a test, expect a deviation), confidence tiers where only \`confirmed\` entries apply automatically and \`reported\` or \`suspected\` ones need \`-k ID\`, and \`-K\` to ignore the file so a crash counts as a finding.
 
 **Output:** one line per test with verdict, oracle class, the manual section it comes from, and every quirk that was applied (its id, confidence and the match reason), machine-readable for CI and readable in a Shell. Applied quirks are listed at the top of the report, not buried, so a quirk can never silently hide a regression.
@@ -76,7 +76,7 @@ Hours of mixed load to find what only time and fragmentation expose: allocator l
 
 - **Workload:** the FileSystemsStressTest pattern generalised: seeded random files, hash on write and on read-back, delete a percentage and regenerate at the same total size, repeat; plus directory-heavy phases (thousands of entries, then delete every other one), large sequential files, and a long-lived set of files rewritten in place to exercise `nocow`-style paths.
 - **Invariants checked between phases:** free space within a format-specific bound of the live file total (directories, metadata, allocation units and reserved blocks make an exact match impossible; the bound is declared per format in the quirks file); `Info()` self-consistency; a full `ExAll` walk matching the expected set; for formats with a host checker, an unmount and host-side verify at the end of each hour as a separate check.
-- **Fragmentation report:** extent count per file and free-extent histogram where the handler exposes them (Phoenix `GET_STATS`), otherwise sequential-read rates before and after are recorded as a performance signal only, since they are too noisy to call a fragmentation measurement.
+- **Fragmentation report:** extent count per file and free-extent histogram where the handler exposes them (the new handler's `GET_STATS`), otherwise sequential-read rates before and after are recorded as a performance signal only, since they are too noisy to call a fragmentation measurement.
 - **Duration tiers:** 10 minutes for nightly emulator runs, 8 hours for hardware soak before a release.
 - **Resumable:** the run state (seed, phase, iteration) is written to a separate volume so a crash mid-soak is itself a reportable event with a known position, not a lost night. If that volume is unavailable or its log fails its own checksum, the run restarts from the seed and reports the loss of position rather than guessing.
 
@@ -108,7 +108,7 @@ The real handler, OS and driver under scripted breakage, driven from the host so
 
 **Staging.** The policy language is deliberately broad, but the campaign starts narrow: dropped writes, ignored flushes and power cuts first, with their recovery assertions validated against a known-good handler, then reorder, stale reads and torn writes once ordering semantics at the guest-visible block layer are pinned down (held writes are visible to reads, as a write cache would be; fault state survives `state.save`/`state.load`). Every event carries the target and request sequence number so a campaign can be audited after the fact.
 
-**Format-dependent checks** (metadata checksums, data checksums, snapshots) are capabilities declared per format, not generic pass criteria; a format without them gets the `model`-class verdict for those rows rather than a fail, and the report level says so, so results across FFS, PFS3, SFS and Phoenix stay comparable.
+**Format-dependent checks** (metadata checksums, data checksums, snapshots) are capabilities declared per format, not generic pass criteria; a format without them gets the `model`-class verdict for those rows rather than a fail, and the report level says so, so results across FFS, PFS3, SFS and the new handler stay comparable.
 
 ## Oracles
 
@@ -118,10 +118,10 @@ A test is only as good as what decides "correct"; each layer names its oracle an
 | --- | --- | --- | --- |
 | The AmigaDOS Manual, encoded as expectations | Layer 1 | Authoritative for protocol behaviour; where old autodocs disagree the manual wins and the test says so | Every handler |
 | In-memory model | Layers 2 and 3 | Catches content and metadata divergence immediately; blind to on-disk structure | Every handler |
-| Host implementation of the format | Layers 3 and 4, and end-of-run checks | Reads the bytes in a different environment. For Phoenix it shares the C core with the handler and is therefore *correlated*: it catches codegen, alignment and driver effects, not shared logic errors. For FFS and PFS3 the crates are separate code and count as independent once validated against the reference handlers | Phoenix (correlated); FFS and PFS3 (independent) via the Rust crates |
-| Reference handler under amiga-fuse | Cross-checks of the host crates themselves | Shadow-compare of every operation against the original handler run under volamos | FFS, PFS3; Phoenix once its handler exists |
+| Host implementation of the format | Layers 3 and 4, and end-of-run checks | Reads the bytes in a different environment. For the new handler it shares the C core with the handler and is therefore *correlated*: it catches codegen, alignment and driver effects, not shared logic errors. For FFS and PFS3 the crates are separate code and count as independent once validated against the reference handlers | The new handler (correlated); FFS and PFS3 (independent) via the Rust crates |
+| Reference handler under amiga-fuse | Cross-checks of the host crates themselves | Shadow-compare of every operation against the original handler run under volamos | FFS, PFS3; the new handler once its handler exists |
 
-The reference-handler oracle closes the loop: the host crates are proven against the original handlers, then used to judge the new handler. Phoenix's own handler becomes a reference for its host implementation the same way, so the two can never drift silently.
+The reference-handler oracle closes the loop: the host crates are proven against the original handlers, then used to judge the new handler. The same applies in reverse: the new handler becomes a reference for its own host implementation, so the two can never drift silently.
 
 ## Execution tiers and reproducibility
 
@@ -158,7 +158,7 @@ The operation stream and seed are portable across tiers; each tier records a wor
 **Relationships**
 
 - *devsoak:* a separate binary for block device drivers. fstest assumes the device is correct; the only shared artefact is the fault shim. A driver-level suspicion raised by fstest is handed to devsoak with the device and geometry.
-- *Phoenix:* fstest is Phoenix's acceptance suite, but Phoenix is not fstest's only target; running the same suite against FFS and PFS3 is how the suite itself is validated and how differences are documented.
+- *The new handler:* fstest is the new handler's acceptance suite, but the new handler is not fstest's only target; running the same suite against FFS and PFS3 is how the suite itself is validated and how differences are documented.
 - *amiga-ffs / amiga-pfs / amiga-fuse:* provide the host-implementation and reference-handler oracles. fstest adds nothing to those crates beyond a verify entry point.
 - *AmiBake:* builds the emulator environments (OS version, handler, devices) that the nightly tier boots.
 - *volamos:* the per-commit tier depends on its handler-hosting phase; until that exists, the per-commit tier runs layer 2 against the host crates only.
