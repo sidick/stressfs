@@ -49,10 +49,47 @@ name: CI
 # run-identity header and JSON lines is, as with M1, a local-only
 # script (ci/copperline-m2.sh) for the same licensed-assets reason.
 
+# M5 (docs/implementation-plan.md section 3's M5 entry): "nightly CI runs
+# the Copperline tier green." The honest shape of that, worked out while
+# building M5: the REAL three-handler tier (FFS V40, FFS V47, PFS3-AIO)
+# needs licensed Kickstart ROMs and a personal FFS V47 HDF this repo
+# cannot ship (same caveat as every ci/copperline-*.sh script since M0),
+# so it genuinely cannot run unattended on a standard GitHub-hosted
+# runner -- it needs a self-hosted runner with those assets pre-staged,
+# which does not exist for this project yet. Rather than fake a job that
+# claims to be that tier while secretly skipping it, two separate things
+# are added instead:
+#
+#   - `copperline-aros-smoke` (nightly schedule + workflow_dispatch, this
+#     file, below): a REAL, GREEN, asset-free Copperline run. Copperline
+#     bundles the AROS boot ROM (no Kickstart needed) and amitools builds
+#     an FFS "DOS1" HDF from nothing but open tooling, so this boots a
+#     real headless Copperline session and sends the one baseline
+#     ACTION_IS_FILESYSTEM packet against AROS's own FFS-compatible
+#     afs.handler -- proving the actual send/receive path this whole
+#     project depends on works end to end on a stock GitHub runner. It is
+#     deliberately NOT the full `stressfs conform` table: that was tried
+#     against this same AROS+FFS pairing while building M5 and hung (the
+#     baseline packet alone consistently returns promptly; the fuller
+#     conform run does not, and this session did not have time to root
+#     cause why -- see docs/verdict-matrix.md and the M5 session notes).
+#     Claiming more than the baseline here would be exactly the "fake a
+#     green job" failure mode this comment exists to avoid.
+#   - `copperline-nightly-full` (workflow_dispatch ONLY, no schedule):
+#     a documented placeholder for the real three-handler tier. It is a
+#     TODO, not a working job -- see its own step for exactly what a
+#     self-hosted runner would need (the two Kickstart ROMs + the FFS V47
+#     HDF ci/copperline-m5.sh's env vars already name) before this can be
+#     turned into a real scheduled job.
 on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    # 03:17 UTC nightly -- off the hour, same reasoning any "nightly cron"
+    # convention uses (avoid the top-of-hour pile-up on shared runners).
+    - cron: "17 3 * * *"
+  workflow_dispatch:
 
 jobs:
   host-test:
@@ -337,3 +374,105 @@ jobs:
           grep -q '"diverged":true' /tmp/stressfs-random-selftest/stressfs-random-report.json \
             || { echo "::error::no diverged:true line in the self-test report"; exit 1; }
           echo "OK: the deliberately corrupted expectation was reported as a divergence"
+
+  # M5: the real, asset-free Copperline tier -- see this file's top
+  # comment for the full "why this and not the real three-handler tier"
+  # reasoning. macos-latest because Copperline's only packaged
+  # distribution (the linuxjedi/copperline Homebrew tap) requires macOS;
+  # there is no Linux package to install here the way volamos-smoke
+  # installs a prebuilt Linux volamos binary.
+  copperline-aros-smoke:
+    needs: cross-build
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download cross-built binary
+        uses: actions/download-artifact@v8
+        with:
+          name: stressfs-m68k
+          path: build-m68k
+
+      - name: Make binary executable
+        run: chmod +x build-m68k/stressfs
+
+      - name: Install Copperline (Homebrew tap)
+        run: |
+          brew tap linuxjedi/copperline
+          brew install copperline
+          copperline --version
+
+      - name: Install amitools (rdbtool/xdftool)
+        run: pip3 install --break-system-packages amitools
+
+      - name: Build a fresh FFS "DOS1" HDF (amitools only, no licensed assets)
+        # Same construction ci/m5/build-ffs-v40-hdf.sh uses locally,
+        # inlined here rather than sourcing that script's exact ROM
+        # assumptions (it is written for the FFS V40 ROM-resident case,
+        # which has no bearing on booting it under AROS instead).
+        run: |
+          set -eu
+          OUT="$RUNNER_TEMP/aros-smoke.hdf"
+          rdbtool "$OUT" create size=20Mi + init + add size=100% name=Work bootable dostype=ffs
+          xdftool "$OUT" open part=Work + format Work ffs
+          echo "HDF=$OUT" >> "$GITHUB_ENV"
+
+      - name: Boot Copperline (bundled AROS, no Kickstart) and send the baseline packet
+        # No `rom =` key at all: Copperline boots its bundled AROS ROM.
+        # `--run`/`--exit-on-return`, same standing headless-only rule
+        # every ci/copperline-*.sh script in this repo follows.
+        run: |
+          set -eu
+          printf '[machine]\nprofile = "A1200"\n\n[ide]\nmaster = "%s"\n' "$HDF" \
+            > "$RUNNER_TEMP/aros-smoke.toml"
+          rc=0
+          timeout 60 copperline --config "$RUNNER_TEMP/aros-smoke.toml" --noaudio \
+            --run build-m68k/stressfs --run-args "VOLUME Work: TIER aros-smoke" \
+            --exit-on-return || rc=$?
+          echo "stressfs exit code under AROS: $rc"
+          # Hello-world mode (M0's own contract): RETURN_WARN(5) is the
+          # expected "ran, printed a result" outcome -- see
+          # ci/copperline-m0.sh and amiga/src/main.c. 124 is the `timeout`
+          # above firing, which IS a failure for this specific baseline
+          # packet (unlike the full conform table, this one packet
+          # reliably returns quickly against this AROS+FFS pairing, per
+          # this file's top comment).
+          if [ "$rc" != 5 ] && [ "$rc" != 0 ]; then
+            echo "::error::expected exit 0 or 5 (RETURN_OK/RETURN_WARN), got $rc"
+            exit 1
+          fi
+
+  # M5: documented placeholder for the REAL three-handler nightly tier
+  # (FFS V40, FFS V47, PFS3-AIO) -- NOT wired to `schedule:`, intentionally.
+  # This is honesty-over-appearance: the job below does not run anything
+  # yet because doing so needs assets no standard GitHub-hosted runner can
+  # have (two licensed Kickstart ROMs, plus the personal FFS V47 HDF
+  # every ci/copperline-*.sh script since M0 has needed). Turning this
+  # into a real job needs a SELF-HOSTED runner with those assets staged
+  # and the same env vars ci/copperline-m5.sh already reads
+  # (COPPERLINE_ROM_V47, COPPERLINE_HDF_V47, COPPERLINE_ROM_V40) pointed
+  # at them, plus a `runs-on: [self-hosted, ...]` label and a `schedule:`
+  # trigger once that runner exists. TODO, not yet done.
+  copperline-nightly-full:
+    needs: cross-build
+    runs-on: ubuntu-latest
+    # workflow_dispatch only -- never runs on the `schedule:` trigger
+    # above, so it cannot silently claim nightly coverage it does not
+    # provide. See this job's header comment.
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Explain the gap rather than fake a green run
+        run: |
+          echo "## Copperline nightly tier: not yet runnable on a GitHub-hosted runner" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "FFS V40, FFS V47 and PFS3-AIO all need licensed/personal Kickstart ROM" >> "$GITHUB_STEP_SUMMARY"
+          echo "and HDF assets this repo cannot ship (same caveat as ci/copperline-m5.sh" >> "$GITHUB_STEP_SUMMARY"
+          echo "and every ci/copperline-*.sh script before it). This job is a deliberate" >> "$GITHUB_STEP_SUMMARY"
+          echo "placeholder, not a working tier: it needs a self-hosted runner with those" >> "$GITHUB_STEP_SUMMARY"
+          echo "assets staged and COPPERLINE_ROM_V47/COPPERLINE_HDF_V47/COPPERLINE_ROM_V40" >> "$GITHUB_STEP_SUMMARY"
+          echo "pointed at them (see ci/copperline-m5.sh's own usage comment), at which" >> "$GITHUB_STEP_SUMMARY"
+          echo "point this job's \`runs-on:\` and \`if:\` should both change." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "In the meantime, \`copperline-aros-smoke\` (this same workflow) IS a real," >> "$GITHUB_STEP_SUMMARY"
+          echo "green, nightly-scheduled Copperline run that needs no licensed assets --" >> "$GITHUB_STEP_SUMMARY"
+          echo "see its own job for what it does and does not prove." >> "$GITHUB_STEP_SUMMARY"

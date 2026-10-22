@@ -23,7 +23,13 @@
 # "$VER:" string), id~STR (case-insensitive substring of the whole
 # "$VER:" string), kick</<=/>/>=/= N (the running Kickstart's
 # exec.library lib_Version), dos</<=/>/>=/= N (the running dos.library
-# version). Any other key is not evaluable by this parser: an entry
+# version), dostype=STR (case-insensitive exact match on the volume's
+# on-disk DosType, e.g. "DOS1" or "PFS3" -- added at M5 so a
+# ROM-resident handler with no "$VER:" string to scan, such as FFS V40
+# baked into an A3000/A4000-profile Kickstart 3.1 ROM, can still be
+# matched; see amiga/include/stressfs/quirks.h for the shorthand
+# convention this uses for a DosType's non-printable low byte). Any
+# other key is not evaluable by this parser: an entry
 # using one is flagged unmatchable at load time, printed as a warning,
 # and can then only ever be applied via FORCEQUIRK.
 #
@@ -129,6 +135,94 @@ action  expect-deviation set-file-size-grow */0
 action  expect-deviation set-file-size-truncate */0
 status  confirmed
 
+# --- reproduced by stressfs against FFS V40 under Copperline --------------
+# M5 (docs/implementation-plan.md section 3's M5 entry). FFS V40 runs
+# ROM-resident on an A3000/A4000-profile Kickstart 3.1 ROM (FastFileSystem
+# is a resident module baked into that Kickstart, not an L:-loaded hunk
+# file), so it has no classic hunk seglist for handler_id.c's "$VER:"
+# scan to search -- `name=`/`version=` can never match it, which is
+# exactly the gap the `pfs3-aio-identity-unexpressible` placeholder entry
+# below flagged back at M3. M5 added the `dostype=` match key (see
+# amiga/include/stressfs/quirks.h) to close it: DosType comes from the
+# mount-time DosEnvec, available regardless of whether a "$VER:" string
+# exists. All five entries below were reproduced on 2026-10-22 with
+# ci/copperline-m5.sh (headless, scripted `--run`/`--exit-on-return`; A3000
+# profile + `[scsi] controller = "a3000"` -- this ROM's scsi.device
+# cannot drive Copperline's Gayle `[ide]` emulation, see
+# docs/verdict-matrix.md's "Boot environments" section -- a fresh FFS
+# "DOS1" partition built with amitools rdbtool+xdftool, no OS install
+# needed since Copperline's `--run` stages its own boot volume),
+# Kickstart 3.1 (40.68), dos.library 40, no "$VER:" string available
+# (handler identified only by DosType + dos.library version). The first
+# four are the SAME behaviours already confirmed against FFS 47.4 above,
+# reproduced again on the older ROM-resident handler; the fifth
+# (ACTION_END) is a genuinely new finding not present on FFS 47.4.
+
+quirk   ffs-v40-is-filesystem-res2-garbage
+match   dostype=DOS1 dos>=40
+because Same finding as ffs-is-filesystem-res2-garbage above, reproduced
+        directly against FFS V40 (ROM-resident, no "$VER:" string):
+        ACTION_IS_FILESYSTEM answers dp_Res1 = DOSTRUE correctly but
+        leaves dp_Res2 = 1027 un-zeroed.
+action  expect-deviation baseline-is-filesystem -1/*
+status  confirmed
+
+quirk   ffs-v40-nil-action-not-known
+match   dostype=DOS1 dos>=40
+because Same finding as ffs-nil-action-not-known above, reproduced
+        directly against FFS V40: ACTION_NIL returns DOSFALSE with
+        dp_Res2 = ERROR_ACTION_NOT_KNOWN (209).
+action  expect-deviation baseline-nil 0/209
+status  confirmed
+
+quirk   ffs-v40-exclusive-root-lock-granted
+match   dostype=DOS1 dos>=40
+because Same finding as ffs-exclusive-root-lock-granted above, reproduced
+        directly against FFS V40: an exclusive ACTION_LOCATE_OBJECT on
+        the root grants a real lock (dp_Res2 = 0) instead of being
+        refused.
+action  expect-deviation locate-exclusive-root */0
+status  confirmed
+
+quirk   ffs-v40-set-file-size-returns-size
+match   dostype=DOS1 dos>=40
+because Same finding as ffs-set-file-size-returns-size above, reproduced
+        directly against FFS V40: ACTION_SET_FILE_SIZE returns the new
+        file size in dp_Res1 (20 after growing the 15-byte fixture by
+        5, 5 after truncating it back) rather than DOSTRUE/DOSFALSE.
+action  expect-deviation set-file-size-grow */0
+action  expect-deviation set-file-size-truncate */0
+status  confirmed
+
+quirk   ffs-v40-end-close-returns-32
+match   dostype=DOS1 dos>=40
+because NEW finding, not present against FFS 47.4: ACTION_END (the
+        packet dos.library's Close() sends) is documented to return
+        DOSTRUE/DOSFALSE in dp_Res1; FFS V40 instead returns 32 there,
+        with dp_Res2 = 0, both for a file opened for output
+        (ACTION_FINDOUTPUT) and one opened for input
+        (ACTION_FINDINPUT). 32 is neither DOSTRUE (-1) nor a documented
+        AmigaDOS error code, and it is not simply the fixture's byte
+        count (the output fixture is 15 bytes, later grown to 20 and
+        truncated to 5 by the SET_FILE_SIZE tests above; the input
+        fixture, probe.txt, is a separate small file) -- it does not
+        correlate with the ACTION_END packet number either (32 is not
+        ACTION_END's own `dp_Type`). stressfs has not determined what
+        32 actually encodes; it is recorded here as observed fact, not
+        explained. dos.library's Close() (RKRM "Input and Output")
+        reports success based on this same dp_Res1 the same way it
+        treats every other packet's DOSTRUE, so a close() caller
+        relying on the wrapper sees ordinary success either way --
+        again the packet/wrapper-twin split the proposal calls for is
+        what surfaces this at all. dp_Res1 is pinned to '*' (the value
+        is a fixed constant here, 32, but pinning it narrowly risks the
+        entry going stale if a different fixture size ever changes
+        whatever 32 actually represents); dp_Res2 pinned to 0 keeps a
+        real failure out of this entry's scope.
+action  expect-deviation end-close-output */0
+action  expect-deviation end-close-input */0
+status  confirmed
+
 # --- from the proposal's text only, NOT reproduced by stressfs ------------
 # These entries are the ones the implementation plan asks to seed "from
 # the proposal" -- no stressfs run has reproduced any of them, so by the
@@ -196,5 +290,20 @@ because Placeholder kept deliberately, and deliberately UNMATCHABLE, to
         comment nobody greps. No real action is attached beyond a skip
         of a test id that does not exist, so forcing it does nothing
         harmful.
+
+        UPDATE at M5: the general gap this entry anticipated IS now
+        closed -- `dostype=` (note: not `handler-dostype`, this entry's
+        own made-up key name) is a real, evaluable match key as of M5
+        (see the `dostype=DOS1` entries above, and
+        amiga/include/stressfs/quirks.h). What did NOT happen is PFS3
+        identification itself: PFS3-AIO never mounted long enough
+        under Copperline this session to read ITS DosType back (see
+        ci/m5/pfs3-aio-status.md for the full account), so there is
+        still no reproduced PFS3 entry to add, and this placeholder is
+        left exactly as M3 wrote it -- still deliberately using a key
+        name (`handler-dostype`) the parser was never going to
+        evaluate, still documenting the SPECIFIC gap of "PFS3 never
+        got identified", which remains true even though the KIND of
+        gap M3 guessed at (no evaluable key at all) no longer does.
 action  skip pfs3-placeholder-never-matches
 status  suspected

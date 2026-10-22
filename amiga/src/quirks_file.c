@@ -49,7 +49,13 @@
  * concatenated a log into it. A file that does not fit is refused
  * (not truncated and parsed, which could leave a half-entry looking
  * well-formed). */
-#define QUIRKS_FILEBUF_MAX 16384UL
+/* Raised from 16384 at M5: the file crossed that bound once M5 added
+ * its own reproduced-finding entries (data/stressfs.quirks, "---
+ * reproduced by stressfs against FFS V40 under Copperline ---") on top
+ * of M3's seed set. Still a small, fixed bound -- a hand-maintained
+ * text file of a few dozen entries, nowhere near this -- just a larger
+ * one, not an unbounded read. */
+#define QUIRKS_FILEBUF_MAX 32768UL
 
 static const char *const g_default_paths[] = {
     "stressfs.quirks",

@@ -54,6 +54,17 @@
  *                     table's own min_version gating (handler_id.h) and
  *                     several AmigaDOS-level behaviours are keyed to it
  *                     rather than to the handler's own revision.
+ *     dostype=STR     case-insensitive exact match on the volume's
+ *                     on-disk DosType ("DOS1", "DOS3", "PFS3", ...).
+ *                     Added at M5: a ROM-resident handler (FastFileSystem
+ *                     supplied as a Kickstart resident module rather than
+ *                     loaded from L:, which is how FFS V40 runs on an
+ *                     A3000/A4000-profile Kickstart 3.1 ROM) has no
+ *                     classic hunk seglist to scan for a "$VER:" string,
+ *                     so name=/version= can never match it even though
+ *                     the handler is perfectly identifiable by DosType.
+ *                     This is the key the pfs3-aio-identity-unexpressible
+ *                     placeholder entry (seeded at M3) asked for.
  *
  * Any other key is WELL-FORMED BUT UNEVALUABLE (e.g. a machine type, a
  * DosType nobody exposes, "the medium is removable"). Exactly as in
@@ -228,6 +239,19 @@ typedef enum {
     STRESSFS_QUIRK_KEY_ID,
     STRESSFS_QUIRK_KEY_KICK,
     STRESSFS_QUIRK_KEY_DOS,
+    /* M5: the volume's on-disk DosType ("DOS1", "PFS3", ...), e.g.
+     * `dostype=PFS3`. Added because ROM-resident handlers (FFS on a
+     * machine profile whose Kickstart carries FastFileSystem as a
+     * resident module rather than an L:-loaded segment, e.g. FFS V40
+     * under an A3000 Kickstart 3.1 ROM) have no classic hunk seglist
+     * to scan for a "$VER:" string, so `name=`/`version=` can never
+     * match them -- handler_id.c's own comment flags this, and the
+     * quirks file's `pfs3-aio-identity-unexpressible` placeholder
+     * entry asked for exactly this key to be added once M5 needed it.
+     * DosType is always available (it comes from ACTION_DISK_INFO /
+     * the mount DosEnvec, not the segment list), so it identifies a
+     * handler family even when name/version cannot. */
+    STRESSFS_QUIRK_KEY_DOSTYPE,
     STRESSFS_QUIRK_KEY_UNEVALUABLE
 } stressfs_quirk_key_t;
 
@@ -282,6 +306,8 @@ typedef struct {
     long kick_version;                  /* exec.library lib_Version */
     long dos_version;                   /* dos.library lib_Version */
     int  identified;                    /* 0 = handler identity unknown */
+    char dostype[5];                    /* on-disk DosType, e.g. "DOS1",
+                                          * "PFS3"; empty if unavailable */
 } stressfs_quirk_identity_t;
 
 typedef struct {

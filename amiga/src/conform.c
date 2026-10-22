@@ -1191,6 +1191,36 @@ int stressfs_conform_run(const char *volume, const char *tier, long seed,
     }
     qid.dos_version = dos_version;
     qid.kick_version = (long)SysBase->LibNode.lib_Version;
+    /* M5: dostype= match key (quirks.h). Comes from the mount-time
+     * DosEnvec, not the "$VER:" segment scan, so it is available even
+     * for a ROM-resident handler (FFS V40 under an A3000/A4000-profile
+     * Kickstart 3.1 ROM) that has no seglist to find a "$VER:" string
+     * in -- exactly the gap the quirks file's
+     * pfs3-aio-identity-unexpressible placeholder entry flagged. */
+    if (envec.have_envec) {
+        /* The low byte of a DosType is a raw subtype number (0-7 for
+         * FFS/OFS variants, likewise for PFS3's own family), NOT an
+         * ASCII digit -- 'DOS\1' is bytes 'D','O','S',0x01, where 0x01
+         * is a non-printable control byte. Every Amiga disk tool
+         * (rdbtool, HDToolBox, ...) nonetheless WRITES these as "DOS1"
+         * -- the low byte rendered as a decimal digit -- because a raw
+         * control byte cannot be typed into a text file. A quirks file
+         * is exactly such a text file, so dostype= values must follow
+         * the same shorthand for an author to be able to write them
+         * (and for this code and data/stressfs.quirks to agree on what
+         * "DOS1"/"PFS3" mean), rather than comparing raw bytes. */
+        ULONG t = (ULONG)envec.de_dostype;
+        unsigned char b0 = (unsigned char)((t >> 24) & 0xff);
+        unsigned char b1 = (unsigned char)((t >> 16) & 0xff);
+        unsigned char b2 = (unsigned char)((t >> 8) & 0xff);
+        unsigned char b3 = (unsigned char)(t & 0xff);
+        qid.dostype[0] = (b0 >= 0x20 && b0 < 0x7f) ? (char)b0 : '?';
+        qid.dostype[1] = (b1 >= 0x20 && b1 < 0x7f) ? (char)b1 : '?';
+        qid.dostype[2] = (b2 >= 0x20 && b2 < 0x7f) ? (char)b2 : '?';
+        qid.dostype[3] = (b3 <= 9) ? (char)('0' + b3)
+                        : (b3 >= 0x20 && b3 < 0x7f) ? (char)b3 : '?';
+        qid.dostype[4] = '\0';
+    }
 
     /* Assemble the run-identity header (M2 step 1). handler_name/
      * handler_version always get a non-empty placeholder even when

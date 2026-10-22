@@ -1,0 +1,88 @@
+stressfs run identity: harness=0.1.0-m4 handler="(model-only; see run below for operation kinds exercised)" ((not identified by `random`; see `conform` for handler identity)) tier=ffs-v47 seed=3 dos_version=0
+stressfs run identity: geometry unavailable
+stressfs run identity: dosenvec unavailable
+stressfs random: working set estimate 65560 bytes (AvailMem reports 1636040 free)
+pass         step=1      op=exnext   real=(1,0) expect=(1,*)  exnext dir=-1
+pass         step=2      op=mkdir    real=(1,0) expect=(1,*)  mkdir parent=-1 name=kZJ6nM23h4Fd
+pass         step=3      op=exnext   real=(1,0) expect=(1,*)  exnext dir=-1
+pass         step=4      op=mkdir    real=(1,0) expect=(1,*)  mkdir parent=-1 name=qRMAeBb1wnH
+pass         step=5      op=create   real=(1,0) expect=(1,*)  create parent=1 name=BCXQdFhe5dF2
+pass         step=6      op=close    real=(1,0) expect=(1,*)  close
+pass         step=7      op=create   real=(1,0) expect=(1,*)  create parent=-1 name=8c3GVbA
+pass         step=8      op=read     real=(0,0) expect=(0,*)  read len=25 at pos=0
+pass         step=9      op=setsize  real=(729,0) expect=(729,*)  setsize grow to=729
+pass         step=10     op=seek     real=(0,0) expect=(0,*)  seek to=199
+pass         step=11     op=read     real=(465,0) expect=(465,*)  read len=465 at pos=199
+pass         step=12     op=seek     real=(664,0) expect=(664,*)  seek to=158
+pass         step=13     op=close    real=(1,0) expect=(1,*)  close
+pass         step=14     op=delete   real=(1,0) expect=(1,*)  delete target=3
+pass         step=15     op=create   real=(1,0) expect=(1,*)  create parent=1 name=bCXQdFhe5dF2
+pass         step=16     op=seek     real=(0,0) expect=(0,*)  seek to=0
+pass         step=17     op=close    real=(1,0) expect=(1,*)  close
+pass         step=18     op=rename   real=(1,0) expect=(1,*)  rename target=2 dest_parent=-1 new_name=n8CA8jmIO
+pass         step=19     op=create   real=(1,0) expect=(1,*)  create parent=1 name=ZkflIN
+pass         step=20     op=seek     real=(0,0) expect=(0,*)  seek to=0
+pass         step=21     op=read     real=(0,0) expect=(0,*)  read len=343 at pos=0
+pass         step=22     op=write    real=(35,0) expect=(35,*)  write len=35 at pos=0
+pass         step=23     op=setsize  real=(34,0) expect=(34,*)  setsize truncate to=34
+pass         step=24     op=close    real=(1,0) expect=(1,*)  close
+pass         step=25     op=exnext   real=(1,0) expect=(1,*)  exnext dir=1
+pass         step=26     op=exnext   real=(1,0) expect=(1,*)  exnext dir=0
+pass         step=27     op=delete   real=(1,0) expect=(1,*)  delete target=2
+pass         step=28     op=exnext   real=(1,0) expect=(1,*)  exnext dir=-1
+pass         step=29     op=create   real=(1,0) expect=(1,*)  create parent=0 name=Ru2W7uPQ
+pass         step=30     op=write    real=(54,0) expect=(54,*)  write len=54 at pos=0
+pass         step=31     op=close    real=(1,0) expect=(1,*)  close
+pass         step=32     op=create   real=(1,0) expect=(1,*)  create parent=1 name=NgRm4
+pass         step=33     op=write    real=(207,0) expect=(207,*)  write len=207 at pos=0
+pass         step=34     op=write    real=(12,0) expect=(12,*)  write len=12 at pos=207
+pass         step=35     op=setsize  real=(418,0) expect=(418,*)  setsize grow to=418
+pass         step=36     op=write    real=(244,0) expect=(244,*)  write len=244 at pos=219
+pass         step=37     op=write    real=(72,0) expect=(72,*)  write len=72 at pos=463
+pass         step=38     op=write    real=(207,0) expect=(207,*)  write len=207 at pos=535
+pass         step=39     op=read     real=(0,0) expect=(0,*)  read len=110 at pos=742
+pass         step=40     op=write    real=(4,0) expect=(4,*)  write len=4 at pos=742
+pass         step=41     op=seek     real=(746,0) expect=(746,*)  seek to=521
+pass         step=42     op=read     real=(225,0) expect=(225,*)  read len=336 at pos=521
+pass         step=43     op=write    real=(224,0) expect=(224,*)  write len=224 at pos=746
+pass         step=44     op=seek     real=(970,0) expect=(970,*)  seek to=240
+pass         step=45     op=seek     real=(240,0) expect=(240,*)  seek to=361
+pass         step=46     op=write    real=(1998,0) expect=(1998,*)  write len=1998 at pos=361
+pass         step=47     op=setsize  real=(6070,0) expect=(6070,*)  setsize grow to=6070
+pass         step=48     op=seek     real=(2359,0) expect=(2359,*)  seek to=5823
+pass         step=49     op=read     real=(247,0) expect=(247,*)  read len=276 at pos=5823
+pass         step=50     op=close    real=(1,0) expect=(1,*)  close
+pass         step=51     op=mkdir    real=(1,0) expect=(1,*)  mkdir parent=-1 name=U7N6h
+pass         step=52     op=mkdir    real=(1,0) expect=(1,*)  mkdir parent=-1 name=2DDgpDMVrb
+pass         step=53     op=mkdir    real=(1,0) expect=(1,*)  mkdir parent=-1 name=vPvUet9
+pass         step=54     op=mkdir    real=(1,0) expect=(1,*)  mkdir parent=-1 name=e1oATD
+pass         step=55     op=create   real=(1,0) expect=(1,*)  create parent=6 name=jHeoXqEusx1m
+pass         step=56     op=write    real=(102,0) expect=(102,*)  write len=102 at pos=0
+pass         step=57     op=setsize  real=(39,0) expect=(39,*)  setsize truncate to=39
+pass         step=58     op=read     real=(0,0) expect=(0,*)  read len=408 at pos=39
+pass         step=59     op=close    real=(1,0) expect=(1,*)  close
+pass         step=60     op=mkdir    real=(1,0) expect=(1,*)  mkdir parent=-1 name=SkOHjoLbxccK
+pass         step=61     op=rename   real=(1,0) expect=(1,*)  rename target=3 dest_parent=5 new_name=5tUM
+pass         step=62     op=delete   real=(1,0) expect=(1,*)  delete target=3
+pass         step=63     op=create   real=(1,0) expect=(1,*)  create parent=10 name=GzmCfoO2gEK
+pass         step=64     op=seek     real=(0,0) expect=(0,*)  seek to=0
+pass         step=65     op=read     real=(0,0) expect=(0,*)  read len=457 at pos=0
+pass         step=66     op=write    real=(241,0) expect=(241,*)  write len=241 at pos=0
+pass         step=67     op=read     real=(0,0) expect=(0,*)  read len=279 at pos=241
+pass         step=68     op=write    real=(178,0) expect=(178,*)  write len=178 at pos=241
+pass         step=69     op=seek     real=(419,0) expect=(419,*)  seek to=41
+pass         step=70     op=close    real=(1,0) expect=(1,*)  close
+pass         step=71     op=open     real=(1,0) expect=(1,*)  open target=3 mode=0
+pass         step=72     op=read     real=(136,0) expect=(136,*)  read len=136 at pos=0
+pass         step=73     op=write    real=(84,0) expect=(84,*)  write len=84 at pos=136
+pass         step=74     op=write    real=(20,0) expect=(20,*)  write len=20 at pos=220
+pass         step=75     op=setsize  real=(3079,0) expect=(3079,*)  setsize grow to=3079
+pass         step=76     op=read     real=(134,0) expect=(134,*)  read len=134 at pos=240
+pass         step=77     op=setsize  real=(6815,0) expect=(6815,*)  setsize grow to=6815
+pass         step=78     op=write    real=(67,0) expect=(67,*)  write len=67 at pos=374
+pass         step=79     op=seek     real=(441,0) expect=(441,*)  seek to=329
+pass         step=80     op=setsize  real=(3725,0) expect=(3725,*)  setsize truncate to=3725
+pass         step=81     op=write    real=(191,0) expect=(191,*)  write len=191 at pos=329
+fail         step=82     op=read     real=(0,0) expect=(436,*)  read len=436 at pos=520  [DIVERGED: res1/res2 mismatch (model vs. real)]
+stressfs random: DIVERGENCE -- stopping the run here. The report file written so far (seed + this step) is what `stressfs replay` re-runs.
+stressfs random: fixture left in place (not torn down) after a divergence, for inspection -- same discipline as the conform engine's abort path.

@@ -73,6 +73,71 @@ included, so a quirk-covered deviation shows up as the raw finding.
 
 **Behaviour.** ACTION_SET_FILE_SIZE is documented to return DOSTRUE/DOSFALSE in dp_Res1; FFS 47.4 returns the file's NEW SIZE there instead (20 after growing stressfs's 15-byte fixture by 5, 5 after truncating it to 5), with dp_Res2 = 0. This is the proposal's "ACTION_SET_FILE_SIZE return-value" quirk. dp_Res1 is '*' because the value is a file size that depends on the fixture; dp_Res2 pinned to 0 keeps a real failure (nonzero dp_Res2) out of this entry's scope. Note the dos.library wrapper hides this: SetFileSize() reports success either way, which is exactly the proposal's reason for testing packets and wrappers as twins.
 
+### `ffs-v40-is-filesystem-res2-garbage`
+
+| Field | Value |
+| --- | --- |
+| Handler | (any handler) |
+| Version | dos>=40 |
+| Other match conditions | `dostype=DOS1` |
+| Test / packet | `baseline-is-filesystem` |
+| Confidence | `confirmed` |
+| What stressfs does | `baseline-is-filesystem`: reported as `deviation` only when the handler returns dp_Res1=-1, dp_Res2=any (any other failure stays a `fail`) |
+
+**Behaviour.** Same finding as ffs-is-filesystem-res2-garbage above, reproduced directly against FFS V40 (ROM-resident, no "$VER:" string): ACTION_IS_FILESYSTEM answers dp_Res1 = DOSTRUE correctly but leaves dp_Res2 = 1027 un-zeroed.
+
+### `ffs-v40-nil-action-not-known`
+
+| Field | Value |
+| --- | --- |
+| Handler | (any handler) |
+| Version | dos>=40 |
+| Other match conditions | `dostype=DOS1` |
+| Test / packet | `baseline-nil` |
+| Confidence | `confirmed` |
+| What stressfs does | `baseline-nil`: reported as `deviation` only when the handler returns dp_Res1=0, dp_Res2=209 (any other failure stays a `fail`) |
+
+**Behaviour.** Same finding as ffs-nil-action-not-known above, reproduced directly against FFS V40: ACTION_NIL returns DOSFALSE with dp_Res2 = ERROR_ACTION_NOT_KNOWN (209).
+
+### `ffs-v40-exclusive-root-lock-granted`
+
+| Field | Value |
+| --- | --- |
+| Handler | (any handler) |
+| Version | dos>=40 |
+| Other match conditions | `dostype=DOS1` |
+| Test / packet | `locate-exclusive-root` |
+| Confidence | `confirmed` |
+| What stressfs does | `locate-exclusive-root`: reported as `deviation` only when the handler returns dp_Res1=any, dp_Res2=0 (any other failure stays a `fail`) |
+
+**Behaviour.** Same finding as ffs-exclusive-root-lock-granted above, reproduced directly against FFS V40: an exclusive ACTION_LOCATE_OBJECT on the root grants a real lock (dp_Res2 = 0) instead of being refused.
+
+### `ffs-v40-set-file-size-returns-size`
+
+| Field | Value |
+| --- | --- |
+| Handler | (any handler) |
+| Version | dos>=40 |
+| Other match conditions | `dostype=DOS1` |
+| Test / packet | `set-file-size-grow`, `set-file-size-truncate` |
+| Confidence | `confirmed` |
+| What stressfs does | `set-file-size-grow`: reported as `deviation` only when the handler returns dp_Res1=any, dp_Res2=0 (any other failure stays a `fail`); `set-file-size-truncate`: reported as `deviation` only when the handler returns dp_Res1=any, dp_Res2=0 (any other failure stays a `fail`) |
+
+**Behaviour.** Same finding as ffs-set-file-size-returns-size above, reproduced directly against FFS V40: ACTION_SET_FILE_SIZE returns the new file size in dp_Res1 (20 after growing the 15-byte fixture by 5, 5 after truncating it back) rather than DOSTRUE/DOSFALSE.
+
+### `ffs-v40-end-close-returns-32`
+
+| Field | Value |
+| --- | --- |
+| Handler | (any handler) |
+| Version | dos>=40 |
+| Other match conditions | `dostype=DOS1` |
+| Test / packet | `end-close-output`, `end-close-input` |
+| Confidence | `confirmed` |
+| What stressfs does | `end-close-output`: reported as `deviation` only when the handler returns dp_Res1=any, dp_Res2=0 (any other failure stays a `fail`); `end-close-input`: reported as `deviation` only when the handler returns dp_Res1=any, dp_Res2=0 (any other failure stays a `fail`) |
+
+**Behaviour.** NEW finding, not present against FFS 47.4: ACTION_END (the packet dos.library's Close() sends) is documented to return DOSTRUE/DOSFALSE in dp_Res1; FFS V40 instead returns 32 there, with dp_Res2 = 0, both for a file opened for output (ACTION_FINDOUTPUT) and one opened for input (ACTION_FINDINPUT). 32 is neither DOSTRUE (-1) nor a documented AmigaDOS error code, and it is not simply the fixture's byte count (the output fixture is 15 bytes, later grown to 20 and truncated to 5 by the SET_FILE_SIZE tests above; the input fixture, probe.txt, is a separate small file) -- it does not correlate with the ACTION_END packet number either (32 is not ACTION_END's own `dp_Type`). stressfs has not determined what 32 actually encodes; it is recorded here as observed fact, not explained. dos.library's Close() (RKRM "Input and Output") reports success based on this same dp_Res1 the same way it treats every other packet's DOSTRUE, so a close() caller relying on the wrapper sees ordinary success either way -- again the packet/wrapper-twin split the proposal calls for is what surfaces this at all. dp_Res1 is pinned to '*' (the value is a fixed constant here, 32, but pinning it narrowly risks the entry going stale if a different fixture size ever changes whatever 32 actually represents); dp_Res2 pinned to 0 keeps a real failure out of this entry's scope.
+
 ## reported
 
 ### `ffs-v40-flush-acks-early`
@@ -112,5 +177,5 @@ included, so a quirk-covered deviation shows up as the raw finding.
 | Confidence | `suspected` |
 | What stressfs does | `pfs3-placeholder-never-matches`: not executed at all against this handler (verdict `unsupported`) |
 
-**Behaviour.** Placeholder kept deliberately, and deliberately UNMATCHABLE, to exercise and document the parser's second failure mode (see amiga/include/stressfs/quirks.h): `handler-dostype` is a well-formed match key this build cannot evaluate, so this entry is flagged unmatchable at load, warned about once, and can only ever apply via FORCEQUIRK=pfs3-aio-identity-unexpressible. PFS3 identity really is not expressible with the current key set: pfs3_handler's "$VER:" string is not reliably present in its segment list, so name=/version= cannot key on it, and the DosType that WOULD identify it ("PFS3") is not one of the keys the parser evaluates. M5 runs stressfs against PFS3-AIO and will either add a key or record the finding; until then this entry documents the gap in the file itself rather than in a comment nobody greps. No real action is attached beyond a skip of a test id that does not exist, so forcing it does nothing harmful.
+**Behaviour.** Placeholder kept deliberately, and deliberately UNMATCHABLE, to exercise and document the parser's second failure mode (see amiga/include/stressfs/quirks.h): `handler-dostype` is a well-formed match key this build cannot evaluate, so this entry is flagged unmatchable at load, warned about once, and can only ever apply via FORCEQUIRK=pfs3-aio-identity-unexpressible. PFS3 identity really is not expressible with the current key set: pfs3_handler's "$VER:" string is not reliably present in its segment list, so name=/version= cannot key on it, and the DosType that WOULD identify it ("PFS3") is not one of the keys the parser evaluates. M5 runs stressfs against PFS3-AIO and will either add a key or record the finding; until then this entry documents the gap in the file itself rather than in a comment nobody greps. No real action is attached beyond a skip of a test id that does not exist, so forcing it does nothing harmful. UPDATE at M5: the general gap this entry anticipated IS now closed -- `dostype=` (note: not `handler-dostype`, this entry's own made-up key name) is a real, evaluable match key as of M5 (see the `dostype=DOS1` entries above, and amiga/include/stressfs/quirks.h). What did NOT happen is PFS3 identification itself: PFS3-AIO never mounted long enough under Copperline this session to read ITS DosType back (see ci/m5/pfs3-aio-status.md for the full account), so there is still no reproduced PFS3 entry to add, and this placeholder is left exactly as M3 wrote it -- still deliberately using a key name (`handler-dostype`) the parser was never going to evaluate, still documenting the SPECIFIC gap of "PFS3 never got identified", which remains true even though the KIND of gap M3 guessed at (no evaluable key at all) no longer does.
 

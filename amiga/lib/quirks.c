@@ -270,6 +270,16 @@ static int parse_match_token(struct parse_state *ps, stressfs_quirk_entry_t *e,
             fatalf(ps, "match value in '%s' is too long", tok);
             return 0;
         }
+    } else if (ci_eq(key, "dostype")) {
+        if (op != STRESSFS_QUIRK_OP_EQ) {
+            fatalf(ps, "match key 'dostype' only supports '=' (got '%s')", tok);
+            return 0;
+        }
+        c->key = STRESSFS_QUIRK_KEY_DOSTYPE;
+        if (!copy_checked(c->str, sizeof(c->str), val)) {
+            fatalf(ps, "match value in '%s' is too long", tok);
+            return 0;
+        }
     } else if (ci_eq(key, "version") || ci_eq(key, "revision") ||
                ci_eq(key, "kick") || ci_eq(key, "dos")) {
         if (op == STRESSFS_QUIRK_OP_SUBSTR) {
@@ -864,6 +874,8 @@ static int eval_cond(const stressfs_quirk_cond_t *c,
         return cmp_num(ident->kick_version, c->op, c->num);
     case STRESSFS_QUIRK_KEY_DOS:
         return cmp_num(ident->dos_version, c->op, c->num);
+    case STRESSFS_QUIRK_KEY_DOSTYPE:
+        return ci_eq(ident->dostype, c->str);
     default:
         /* An unevaluable key never holds on its own; the entry-level
          * `unevaluable` flag plus FORCEQUIRK is what lets such an entry

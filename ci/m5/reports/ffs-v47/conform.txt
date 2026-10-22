@@ -1,0 +1,56 @@
+stressfs: quirks: stressfs.quirks:276: quirk 'pfs3-aio-identity-unexpressible': match key 'handler-dostype' cannot be evaluated by this build; the entry is marked unmatchable and will only ever apply when named explicitly with FORCEQUIRK=pfs3-aio-identity-unexpressible
+stressfs run identity: harness=0.1.0-m4 handler="(identified handler; DosList DosType field empty)" ($VER: fs 47.4 (16.6.2020)) tier=ffs-v47 seed=0 dos_version=47
+stressfs run identity: geometry numblocks=102058 numblocksused=72 bytesperblock=512 disktype=0x444f5307
+stressfs run identity: dosenvec surfaces=4 sectorperblock=1 blockspertrack=63 reserved=2 prealloc=0 lowcyl=407 highcyl=811 numbuffers=30 maxtransfer=16777215 dostype=0x444f5303 bootpri=0
+stressfs applied quirks: from stressfs.quirks (12 entries in file)
+stressfs applied quirks:   ffs-is-filesystem-res2-garbage [confirmed] auto (confirmed); name=fs AND version>=40
+stressfs applied quirks:     action expect-deviation baseline-is-filesystem res1=-1 res2=*
+stressfs applied quirks:   ffs-nil-action-not-known [confirmed] auto (confirmed); name=fs AND version>=40
+stressfs applied quirks:     action expect-deviation baseline-nil res1=0 res2=209
+stressfs applied quirks:   ffs-exclusive-root-lock-granted [confirmed] auto (confirmed); name=fs AND version>=40
+stressfs applied quirks:     action expect-deviation locate-exclusive-root res1=* res2=0
+stressfs applied quirks:   ffs-set-file-size-returns-size [confirmed] auto (confirmed); name=fs AND version>=40
+stressfs applied quirks:     action expect-deviation set-file-size-grow res1=* res2=0
+stressfs applied quirks:     action expect-deviation set-file-size-truncate res1=* res2=0
+deviation    oracle=independent section=packet-documentation.md#ACTION_IS_FILESYSTEM     res1=-1     res2=1027  baseline: ACTION_IS_FILESYSTEM  [quirk ffs-is-filesystem-res2-garbage (confirmed), expect-deviation: auto (confirmed); name=fs AND version>=40]
+deviation    oracle=independent section=packet-documentation.md#ACTION_NIL               res1=0      res2=209   baseline: ACTION_NIL  [quirk ffs-nil-action-not-known (confirmed), expect-deviation: auto (confirmed); name=fs AND version>=40]
+pass         oracle=independent section=packet-documentation.md#ACTION_CURRENT_VOLUME    res1=39584  res2=0     baseline: ACTION_CURRENT_VOLUME
+pass         oracle=independent section=packet-documentation.md#ACTION_LOCATE_OBJECT     res1=113270 res2=0     baseline: root lock (ACTION_LOCATE_OBJECT "")
+pass         oracle=independent section=packet-documentation.md#ACTION_FREE_LOCK         res1=-1     res2=0     baseline: root unlock (ACTION_FREE_LOCK)
+pass         oracle=independent section=packet-documentation.md#ACTION_LOCATE_OBJECT     res1=113270 res2=0     ACTION_LOCATE_OBJECT (shared, success)
+deviation    oracle=model       section=proposal.md#Layer-1-packet-conformance           res1=113278 res2=0     ACTION_LOCATE_OBJECT (exclusive lock on root, refused -- quirk check)  [quirk ffs-exclusive-root-lock-granted (confirmed), expect-deviation: auto (confirmed); name=fs AND version>=40]
+pass         oracle=independent section=packet-documentation.md#ACTION_LOCATE_OBJECT     res1=0      res2=205   ACTION_LOCATE_OBJECT (not found)
+pass         oracle=independent section=elementary-concepts.md#Lock                      res1=-1     res2=0     dos.library wrapper twin: Lock() shared
+pass         oracle=independent section=packet-documentation.md#ACTION_COPY_DIR          res1=113278 res2=0     ACTION_COPY_DIR (duplicate lock)
+pass         oracle=independent section=packet-documentation.md#ACTION_SAME_LOCK         res1=-1     res2=0     ACTION_SAME_LOCK (dir lock vs. its duplicate)
+pass         oracle=independent section=packet-documentation.md#ACTION_FREE_LOCK         res1=-1     res2=0     ACTION_FREE_LOCK (the duplicate)
+pass         oracle=independent section=packet-documentation.md#ACTION_PARENT            res1=113278 res2=0     ACTION_PARENT (of the fixture dir)
+pass         oracle=independent section=packet-documentation.md#ACTION_FREE_LOCK         res1=-1     res2=0     ACTION_FREE_LOCK (the parent lock)
+pass         oracle=independent section=packet-documentation.md#ACTION_EXAMINE_OBJECT    res1=-1     res2=0     ACTION_EXAMINE_OBJECT (fixture dir)
+pass         oracle=independent section=directories.md#Examine                           res1=-1     res2=0     dos.library wrapper twin: Examine()
+pass         oracle=independent section=packet-documentation.md#ACTION_EXAMINE_NEXT      res1=-1     res2=0     ACTION_EXAMINE_NEXT (first entry)
+pass         oracle=independent section=packet-documentation.md#ACTION_EXAMINE_NEXT      res1=0      res2=232   ACTION_EXAMINE_NEXT (drained to ERROR_NO_MORE_ENTRIES)
+pass         oracle=independent section=packet-documentation.md#ACTION_FINDOUTPUT        res1=-1     res2=0     ACTION_FINDOUTPUT (create out.txt, exclusive)
+pass         oracle=independent section=packet-documentation.md#ACTION_WRITE             res1=15     res2=0     ACTION_WRITE (15 bytes)
+pass         oracle=independent section=packet-documentation.md#ACTION_SEEK              res1=15     res2=0     ACTION_SEEK (OFFSET_BEGINNING)
+pass         oracle=independent section=packet-documentation.md#ACTION_SEEK              res1=0      res2=0     ACTION_SEEK (OFFSET_CURRENT)
+pass         oracle=independent section=packet-documentation.md#ACTION_SEEK              res1=0      res2=0     ACTION_SEEK (OFFSET_END)
+deviation    oracle=independent section=packet-documentation.md#ACTION_SET_FILE_SIZE     res1=20     res2=0     ACTION_SET_FILE_SIZE (grow)  [quirk ffs-set-file-size-returns-size (confirmed), expect-deviation: auto (confirmed); name=fs AND version>=40]
+deviation    oracle=independent section=packet-documentation.md#ACTION_SET_FILE_SIZE     res1=5      res2=0     ACTION_SET_FILE_SIZE (truncate)  [quirk ffs-set-file-size-returns-size (confirmed), expect-deviation: auto (confirmed); name=fs AND version>=40]
+pass         oracle=independent section=packet-documentation.md#ACTION_END               res1=-1     res2=0     ACTION_END (close out.txt)
+pass         oracle=independent section=files.md#Open                                    res1=-1     res2=0     dos.library wrapper twin: Open()/Read()/Close() of probe.txt
+pass         oracle=independent section=packet-documentation.md#ACTION_FINDINPUT         res1=-1     res2=0     ACTION_FINDINPUT (probe.txt, shared)
+pass         oracle=independent section=packet-documentation.md#ACTION_READ              res1=18     res2=0     ACTION_READ (probe.txt contents)
+pass         oracle=independent section=packet-documentation.md#ACTION_END               res1=-1     res2=0     ACTION_END (close probe.txt input handle)
+pass         oracle=independent section=packet-documentation.md#ACTION_FINDUPDATE        res1=-1     res2=0     ACTION_FINDUPDATE (probe.txt, open+close round trip)
+pass         oracle=independent section=packet-documentation.md#ACTION_DELETE_OBJECT     res1=-1     res2=0     ACTION_DELETE_OBJECT (unlocked second.txt)
+pass         oracle=independent section=packet-documentation.md#ACTION_DELETE_OBJECT     res1=0      res2=202   ACTION_DELETE_OBJECT (locked.txt, exclusively open -> ERROR_OBJECT_IN_USE)
+pass         oracle=independent section=packet-documentation.md#ACTION_RENAME_OBJECT     res1=-1     res2=0     ACTION_RENAME_OBJECT (probe.txt -> probe-renamed.txt)
+pass         oracle=independent section=directories.md#Rename                            res1=-1     res2=0     dos.library wrapper twin: Rename()
+pass         oracle=independent section=packet-documentation.md#ACTION_CREATE_DIR        res1=113278 res2=0     ACTION_CREATE_DIR (subdir)
+pass         oracle=independent section=directories.md#CreateDir                         res1=-1     res2=0     dos.library wrapper twin: CreateDir() (subdir2)
+pass         oracle=independent section=packet-documentation.md#ACTION_INFO              res1=-1     res2=0     ACTION_INFO (fixture dir lock)
+pass         oracle=independent section=packet-documentation.md#ACTION_DISK_INFO         res1=-1     res2=0     ACTION_DISK_INFO
+fail         oracle=model       section=implementation-plan.md#M1                        res1=-1     res2=1027  ENGINE SELF-TEST: deliberately wrong expectation (must report fail)
+unsupported  oracle=model       section=implementation-plan.md#M1                        res1=0      res2=0     ENGINE SELF-TEST: version-gating demo (requires dos.library V999, always unsupported)
+pass         oracle=independent section=packet-documentation.md#ACTION_FREE_LOCK         res1=-1     res2=0     ACTION_FREE_LOCK (fixture dir lock)
