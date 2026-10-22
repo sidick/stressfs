@@ -47,6 +47,7 @@ add_library(stressfs-lib STATIC
   lib/prng.c
   lib/conform.c
   lib/report.c
+  lib/quirks.c
 )
 
 target_include_directories(stressfs-lib PUBLIC include)
@@ -68,6 +69,7 @@ if(CMAKE_CROSSCOMPILING)
     src/packet.c
     src/handler_id.c
     src/conform.c
+    src/quirks_file.c
   )
   target_link_libraries(stressfs PRIVATE stressfs-lib)
 endif()
@@ -120,4 +122,24 @@ if(NOT CMAKE_CROSSCOMPILING)
   endif()
 
   add_test(NAME report_test COMMAND report_test)
+
+  # M3: the quirks parser's host unit tests (docs/implementation-plan.md
+  # M3 exit criterion: "host tests cover the parser including malformed
+  # files (refused loudly, never half-applied)"). Gets both the golden
+  # directory (quirks-affected report renderings) and the quirks fixture
+  # directory as compile definitions, same pattern as report_test.
+  add_executable(quirks_test tests/quirks_test.c)
+  target_link_libraries(quirks_test PRIVATE stressfs-lib)
+  target_compile_options(quirks_test PRIVATE -Wall -Wextra -Werror)
+  target_compile_definitions(quirks_test PRIVATE
+    STRESSFS_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/golden"
+    STRESSFS_QUIRKS_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/quirks"
+    STRESSFS_SHIPPED_QUIRKS="${CMAKE_CURRENT_SOURCE_DIR}/../data/stressfs.quirks")
+
+  if(STRESSFS_SANITIZERS)
+    target_compile_options(quirks_test PRIVATE -fsanitize=address,undefined -g)
+    target_link_options(quirks_test PRIVATE -fsanitize=address,undefined)
+  endif()
+
+  add_test(NAME quirks_test COMMAND quirks_test)
 endif()

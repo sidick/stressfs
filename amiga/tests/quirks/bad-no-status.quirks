@@ -1,0 +1,4 @@
+quirk   broken
+match   name=fs
+because No status line at all.
+action  downgrade some-test

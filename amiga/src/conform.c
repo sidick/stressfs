@@ -49,9 +49,12 @@
 #include "stressfs/conform.h"
 #include "stressfs/packet.h"
 #include "stressfs/handler_id.h"
+#include "stressfs/quirks.h"
+#include "stressfs/quirks_file.h"
 #include "stressfs/report.h"
 
 #include <exec/types.h>
+#include <exec/execbase.h>
 #include <dos/dos.h>
 #include <dos/dosextens.h>
 #include <proto/exec.h>
@@ -71,6 +74,13 @@
 #endif
 
 #define STRESSFS_WATCHDOG_SECS 10u
+
+/* The running Kickstart's version is exec.library's own lib_Version,
+ * read straight off ExecBase -- the `kick` match key in
+ * data/stressfs.quirks. libnix's startup code owns the SysBase global
+ * (same arrangement as DOSBase, see main.c's header comment), so this
+ * only declares it. */
+extern struct ExecBase *SysBase;
 
 /* ------------------------------------------------------------------ */
 /* Shared context threaded through the whole table.                   */
@@ -711,121 +721,134 @@ static stressfs_pkt_result_t run_selftest_negative_is_filesystem(void *ctx)
 
 static struct conform_env g_env;
 
-#define ENTRY_EXACT(nm, sect, minver, oracle_, fn, exp1, exp2) \
-    { (nm), (sect), (minver), (oracle_), (fn), &g_env, (exp1), 0, (exp2), 0, NULL }
+/* M3: the quirks database for this run. One static instance, filled
+ * once by stressfs_conform_run() before the first packet and read-only
+ * thereafter -- same lifetime discipline devsoak's quirks.c documents,
+ * and what makes stressfs_quirks_apply_verdict() safe to call from the
+ * table loop without any locking. */
+static stressfs_quirks_db_t g_quirks;
 
-#define ENTRY_RES1_ANY(nm, sect, minver, oracle_, fn, exp2) \
-    { (nm), (sect), (minver), (oracle_), (fn), &g_env, 0, 1, (exp2), 0, NULL }
+/* M3 added the leading `tid` (test id) argument: the short, stable
+ * machine name a quirks entry's action targets (see
+ * stressfs/quirks.h and stressfs/conform.h's comment on
+ * stressfs_test_entry_t.id). Keep these unique and keep them stable --
+ * data/stressfs.quirks points at them by name, and
+ * ci/quirks-check.sh cross-references the two files. */
+#define ENTRY_EXACT(tid, nm, sect, minver, oracle_, fn, exp1, exp2) \
+    { (tid), (nm), (sect), (minver), (oracle_), (fn), &g_env, (exp1), 0, (exp2), 0, NULL }
 
-#define ENTRY_PRED(nm, sect, minver, oracle_, fn, pred) \
-    { (nm), (sect), (minver), (oracle_), (fn), &g_env, 0, 1, 0, 1, (pred) }
+#define ENTRY_RES1_ANY(tid, nm, sect, minver, oracle_, fn, exp2) \
+    { (tid), (nm), (sect), (minver), (oracle_), (fn), &g_env, 0, 1, (exp2), 0, NULL }
+
+#define ENTRY_PRED(tid, nm, sect, minver, oracle_, fn, pred) \
+    { (tid), (nm), (sect), (minver), (oracle_), (fn), &g_env, 0, 1, 0, 1, (pred) }
 
 static const stressfs_test_entry_t g_table[] = {
     /* --- baseline (docs/proposal.md "Safe probing" point 1) --- */
-    ENTRY_EXACT("baseline: ACTION_IS_FILESYSTEM", "packet-documentation.md#ACTION_IS_FILESYSTEM",
+    ENTRY_EXACT("baseline-is-filesystem", "baseline: ACTION_IS_FILESYSTEM", "packet-documentation.md#ACTION_IS_FILESYSTEM",
                 0, STRESSFS_ORACLE_INDEPENDENT, run_is_filesystem, DOSTRUE, 0),
-    ENTRY_EXACT("baseline: ACTION_NIL", "packet-documentation.md#ACTION_NIL",
+    ENTRY_EXACT("baseline-nil", "baseline: ACTION_NIL", "packet-documentation.md#ACTION_NIL",
                 0, STRESSFS_ORACLE_INDEPENDENT, run_nil, DOSTRUE, 0),
-    ENTRY_PRED("baseline: ACTION_CURRENT_VOLUME", "packet-documentation.md#ACTION_CURRENT_VOLUME",
+    ENTRY_PRED("baseline-current-volume", "baseline: ACTION_CURRENT_VOLUME", "packet-documentation.md#ACTION_CURRENT_VOLUME",
                0, STRESSFS_ORACLE_INDEPENDENT, run_current_volume, predicate_nonzero_res1),
-    ENTRY_PRED("baseline: root lock (ACTION_LOCATE_OBJECT \"\")", "packet-documentation.md#ACTION_LOCATE_OBJECT",
+    ENTRY_PRED("baseline-root-lock", "baseline: root lock (ACTION_LOCATE_OBJECT \"\")", "packet-documentation.md#ACTION_LOCATE_OBJECT",
                0, STRESSFS_ORACLE_INDEPENDENT, run_baseline_root_lock, predicate_nonzero_res1),
-    ENTRY_EXACT("baseline: root unlock (ACTION_FREE_LOCK)", "packet-documentation.md#ACTION_FREE_LOCK",
+    ENTRY_EXACT("baseline-root-unlock", "baseline: root unlock (ACTION_FREE_LOCK)", "packet-documentation.md#ACTION_FREE_LOCK",
                 0, STRESSFS_ORACLE_INDEPENDENT, run_baseline_root_unlock, DOSTRUE, 0),
 
     /* --- matrix: locks --- */
-    ENTRY_PRED("ACTION_LOCATE_OBJECT (shared, success)", "packet-documentation.md#ACTION_LOCATE_OBJECT",
+    ENTRY_PRED("locate-shared", "ACTION_LOCATE_OBJECT (shared, success)", "packet-documentation.md#ACTION_LOCATE_OBJECT",
                0, STRESSFS_ORACLE_INDEPENDENT, run_locate_dir_shared, predicate_nonzero_res1),
-    ENTRY_EXACT("ACTION_LOCATE_OBJECT (exclusive lock on root, refused -- quirk check)",
+    ENTRY_EXACT("locate-exclusive-root", "ACTION_LOCATE_OBJECT (exclusive lock on root, refused -- quirk check)",
                 "proposal.md#Layer-1-packet-conformance",
                 0, STRESSFS_ORACLE_MODEL, run_locate_exclusive_root_refused, 0, 0),
-    ENTRY_EXACT("ACTION_LOCATE_OBJECT (not found)", "packet-documentation.md#ACTION_LOCATE_OBJECT",
+    ENTRY_EXACT("locate-not-found", "ACTION_LOCATE_OBJECT (not found)", "packet-documentation.md#ACTION_LOCATE_OBJECT",
                 0, STRESSFS_ORACLE_INDEPENDENT, run_locate_not_found, 0, ERROR_OBJECT_NOT_FOUND),
-    ENTRY_EXACT("dos.library wrapper twin: Lock() shared", "elementary-concepts.md#Lock",
+    ENTRY_EXACT("wrapper-lock", "dos.library wrapper twin: Lock() shared", "elementary-concepts.md#Lock",
                 0, STRESSFS_ORACLE_INDEPENDENT, run_wrapper_lock, DOSTRUE, 0),
-    ENTRY_PRED("ACTION_COPY_DIR (duplicate lock)", "packet-documentation.md#ACTION_COPY_DIR",
+    ENTRY_PRED("copy-dir", "ACTION_COPY_DIR (duplicate lock)", "packet-documentation.md#ACTION_COPY_DIR",
                0, STRESSFS_ORACLE_INDEPENDENT, run_copy_dir, predicate_nonzero_res1),
-    ENTRY_EXACT("ACTION_SAME_LOCK (dir lock vs. its duplicate)", "packet-documentation.md#ACTION_SAME_LOCK",
+    ENTRY_EXACT("same-lock", "ACTION_SAME_LOCK (dir lock vs. its duplicate)", "packet-documentation.md#ACTION_SAME_LOCK",
                 36, STRESSFS_ORACLE_INDEPENDENT, run_same_lock, DOSTRUE, 0),
-    ENTRY_EXACT("ACTION_FREE_LOCK (the duplicate)", "packet-documentation.md#ACTION_FREE_LOCK",
+    ENTRY_EXACT("free-lock-duplicate", "ACTION_FREE_LOCK (the duplicate)", "packet-documentation.md#ACTION_FREE_LOCK",
                 0, STRESSFS_ORACLE_INDEPENDENT, run_free_tmp_lock, DOSTRUE, 0),
-    ENTRY_PRED("ACTION_PARENT (of the fixture dir)", "packet-documentation.md#ACTION_PARENT",
+    ENTRY_PRED("parent", "ACTION_PARENT (of the fixture dir)", "packet-documentation.md#ACTION_PARENT",
                0, STRESSFS_ORACLE_INDEPENDENT, run_parent, predicate_nonzero_res1),
-    ENTRY_EXACT("ACTION_FREE_LOCK (the parent lock)", "packet-documentation.md#ACTION_FREE_LOCK",
+    ENTRY_EXACT("free-lock-parent", "ACTION_FREE_LOCK (the parent lock)", "packet-documentation.md#ACTION_FREE_LOCK",
                 0, STRESSFS_ORACLE_INDEPENDENT, run_free_tmp_lock, DOSTRUE, 0),
 
     /* --- matrix: examine --- */
-    ENTRY_EXACT("ACTION_EXAMINE_OBJECT (fixture dir)", "packet-documentation.md#ACTION_EXAMINE_OBJECT",
+    ENTRY_EXACT("examine-object", "ACTION_EXAMINE_OBJECT (fixture dir)", "packet-documentation.md#ACTION_EXAMINE_OBJECT",
                 0, STRESSFS_ORACLE_INDEPENDENT, run_examine_object, DOSTRUE, 0),
-    ENTRY_EXACT("dos.library wrapper twin: Examine()", "directories.md#Examine",
+    ENTRY_EXACT("wrapper-examine", "dos.library wrapper twin: Examine()", "directories.md#Examine",
                 0, STRESSFS_ORACLE_INDEPENDENT, run_wrapper_examine, DOSTRUE, 0),
-    ENTRY_EXACT("ACTION_EXAMINE_NEXT (first entry)", "packet-documentation.md#ACTION_EXAMINE_NEXT",
+    ENTRY_EXACT("examine-next-first", "ACTION_EXAMINE_NEXT (first entry)", "packet-documentation.md#ACTION_EXAMINE_NEXT",
                 0, STRESSFS_ORACLE_INDEPENDENT, run_examine_next_first, DOSTRUE, 0),
-    ENTRY_EXACT("ACTION_EXAMINE_NEXT (drained to ERROR_NO_MORE_ENTRIES)",
+    ENTRY_EXACT("examine-next-drain", "ACTION_EXAMINE_NEXT (drained to ERROR_NO_MORE_ENTRIES)",
                 "packet-documentation.md#ACTION_EXAMINE_NEXT",
                 0, STRESSFS_ORACLE_INDEPENDENT, run_examine_next_drain, 0, ERROR_NO_MORE_ENTRIES),
 
     /* --- matrix: file I/O --- */
-    ENTRY_EXACT("ACTION_FINDOUTPUT (create out.txt, exclusive)", "packet-documentation.md#ACTION_FINDOUTPUT",
+    ENTRY_EXACT("findoutput", "ACTION_FINDOUTPUT (create out.txt, exclusive)", "packet-documentation.md#ACTION_FINDOUTPUT",
                 0, STRESSFS_ORACLE_INDEPENDENT, run_findoutput, DOSTRUE, 0),
-    ENTRY_EXACT("ACTION_WRITE (15 bytes)", "packet-documentation.md#ACTION_WRITE",
+    ENTRY_EXACT("write", "ACTION_WRITE (15 bytes)", "packet-documentation.md#ACTION_WRITE",
                 0, STRESSFS_ORACLE_INDEPENDENT, run_write, 15, 0),
-    ENTRY_EXACT("ACTION_SEEK (OFFSET_BEGINNING)", "packet-documentation.md#ACTION_SEEK",
+    ENTRY_EXACT("seek-beginning", "ACTION_SEEK (OFFSET_BEGINNING)", "packet-documentation.md#ACTION_SEEK",
                 0, STRESSFS_ORACLE_INDEPENDENT, run_seek_beginning, 15, 0),
-    ENTRY_EXACT("ACTION_SEEK (OFFSET_CURRENT)", "packet-documentation.md#ACTION_SEEK",
+    ENTRY_EXACT("seek-current", "ACTION_SEEK (OFFSET_CURRENT)", "packet-documentation.md#ACTION_SEEK",
                 0, STRESSFS_ORACLE_INDEPENDENT, run_seek_current, 0, 0),
-    ENTRY_EXACT("ACTION_SEEK (OFFSET_END)", "packet-documentation.md#ACTION_SEEK",
+    ENTRY_EXACT("seek-end", "ACTION_SEEK (OFFSET_END)", "packet-documentation.md#ACTION_SEEK",
                 0, STRESSFS_ORACLE_INDEPENDENT, run_seek_end, 0, 0),
-    ENTRY_EXACT("ACTION_SET_FILE_SIZE (grow)", "packet-documentation.md#ACTION_SET_FILE_SIZE",
+    ENTRY_EXACT("set-file-size-grow", "ACTION_SET_FILE_SIZE (grow)", "packet-documentation.md#ACTION_SET_FILE_SIZE",
                 36, STRESSFS_ORACLE_INDEPENDENT, run_set_file_size_grow, DOSTRUE, 0),
-    ENTRY_EXACT("ACTION_SET_FILE_SIZE (truncate)", "packet-documentation.md#ACTION_SET_FILE_SIZE",
+    ENTRY_EXACT("set-file-size-truncate", "ACTION_SET_FILE_SIZE (truncate)", "packet-documentation.md#ACTION_SET_FILE_SIZE",
                 36, STRESSFS_ORACLE_INDEPENDENT, run_set_file_size_truncate, DOSTRUE, 0),
-    ENTRY_EXACT("ACTION_END (close out.txt)", "packet-documentation.md#ACTION_END",
+    ENTRY_EXACT("end-close-output", "ACTION_END (close out.txt)", "packet-documentation.md#ACTION_END",
                 0, STRESSFS_ORACLE_INDEPENDENT, run_end_close_output, DOSTRUE, 0),
-    ENTRY_EXACT("dos.library wrapper twin: Open()/Read()/Close() of probe.txt",
+    ENTRY_EXACT("wrapper-open-read-close", "dos.library wrapper twin: Open()/Read()/Close() of probe.txt",
                 "files.md#Open", 0, STRESSFS_ORACLE_INDEPENDENT, run_wrapper_open_read_close, DOSTRUE, 0),
-    ENTRY_EXACT("ACTION_FINDINPUT (probe.txt, shared)", "packet-documentation.md#ACTION_FINDINPUT",
+    ENTRY_EXACT("findinput", "ACTION_FINDINPUT (probe.txt, shared)", "packet-documentation.md#ACTION_FINDINPUT",
                 0, STRESSFS_ORACLE_INDEPENDENT, run_findinput, DOSTRUE, 0),
-    ENTRY_RES1_ANY("ACTION_READ (probe.txt contents)", "packet-documentation.md#ACTION_READ",
+    ENTRY_RES1_ANY("read", "ACTION_READ (probe.txt contents)", "packet-documentation.md#ACTION_READ",
                     0, STRESSFS_ORACLE_INDEPENDENT, run_read, 0),
-    ENTRY_EXACT("ACTION_END (close probe.txt input handle)", "packet-documentation.md#ACTION_END",
+    ENTRY_EXACT("end-close-input", "ACTION_END (close probe.txt input handle)", "packet-documentation.md#ACTION_END",
                 0, STRESSFS_ORACLE_INDEPENDENT, run_end_close_input, DOSTRUE, 0),
-    ENTRY_EXACT("ACTION_FINDUPDATE (probe.txt, open+close round trip)",
+    ENTRY_EXACT("findupdate", "ACTION_FINDUPDATE (probe.txt, open+close round trip)",
                 "packet-documentation.md#ACTION_FINDUPDATE",
                 0, STRESSFS_ORACLE_INDEPENDENT, run_findupdate_roundtrip, DOSTRUE, 0),
 
     /* --- matrix: delete / rename / createdir --- */
-    ENTRY_EXACT("ACTION_DELETE_OBJECT (unlocked second.txt)", "packet-documentation.md#ACTION_DELETE_OBJECT",
+    ENTRY_EXACT("delete-unlocked", "ACTION_DELETE_OBJECT (unlocked second.txt)", "packet-documentation.md#ACTION_DELETE_OBJECT",
                 0, STRESSFS_ORACLE_INDEPENDENT, run_delete_unlocked, DOSTRUE, 0),
-    ENTRY_EXACT("ACTION_DELETE_OBJECT (locked.txt, exclusively open -> ERROR_OBJECT_IN_USE)",
+    ENTRY_EXACT("delete-while-locked", "ACTION_DELETE_OBJECT (locked.txt, exclusively open -> ERROR_OBJECT_IN_USE)",
                 "packet-documentation.md#ACTION_DELETE_OBJECT",
                 0, STRESSFS_ORACLE_INDEPENDENT, run_delete_while_locked, 0, ERROR_OBJECT_IN_USE),
-    ENTRY_EXACT("ACTION_RENAME_OBJECT (probe.txt -> probe-renamed.txt)",
+    ENTRY_EXACT("rename-object", "ACTION_RENAME_OBJECT (probe.txt -> probe-renamed.txt)",
                 "packet-documentation.md#ACTION_RENAME_OBJECT",
                 0, STRESSFS_ORACLE_INDEPENDENT, run_rename_object, DOSTRUE, 0),
-    ENTRY_EXACT("dos.library wrapper twin: Rename()", "directories.md#Rename",
+    ENTRY_EXACT("wrapper-rename", "dos.library wrapper twin: Rename()", "directories.md#Rename",
                 0, STRESSFS_ORACLE_INDEPENDENT, run_wrapper_rename, DOSTRUE, 0),
-    ENTRY_PRED("ACTION_CREATE_DIR (subdir)", "packet-documentation.md#ACTION_CREATE_DIR",
+    ENTRY_PRED("create-dir", "ACTION_CREATE_DIR (subdir)", "packet-documentation.md#ACTION_CREATE_DIR",
                0, STRESSFS_ORACLE_INDEPENDENT, run_create_dir, predicate_nonzero_res1),
-    ENTRY_EXACT("dos.library wrapper twin: CreateDir() (subdir2)", "directories.md#CreateDir",
+    ENTRY_EXACT("wrapper-create-dir", "dos.library wrapper twin: CreateDir() (subdir2)", "directories.md#CreateDir",
                 0, STRESSFS_ORACLE_INDEPENDENT, run_wrapper_create_dir, DOSTRUE, 0),
 
     /* --- matrix: volume info --- */
-    ENTRY_EXACT("ACTION_INFO (fixture dir lock)", "packet-documentation.md#ACTION_INFO",
+    ENTRY_EXACT("info", "ACTION_INFO (fixture dir lock)", "packet-documentation.md#ACTION_INFO",
                 0, STRESSFS_ORACLE_INDEPENDENT, run_info, DOSTRUE, 0),
-    ENTRY_EXACT("ACTION_DISK_INFO", "packet-documentation.md#ACTION_DISK_INFO",
+    ENTRY_EXACT("disk-info", "ACTION_DISK_INFO", "packet-documentation.md#ACTION_DISK_INFO",
                 0, STRESSFS_ORACLE_INDEPENDENT, run_disk_info, DOSTRUE, 0),
 
     /* --- engine self-tests (M1 exit criteria) --- */
-    ENTRY_EXACT("ENGINE SELF-TEST: deliberately wrong expectation (must report fail)",
+    ENTRY_EXACT("selftest-negative-expectation", "ENGINE SELF-TEST: deliberately wrong expectation (must report fail)",
                 "implementation-plan.md#M1", 0, STRESSFS_ORACLE_MODEL,
                 run_selftest_negative_is_filesystem, DOSFALSE, 0),
-    ENTRY_EXACT("ENGINE SELF-TEST: version-gating demo (requires dos.library V999, always unsupported)",
+    ENTRY_EXACT("selftest-version-gate", "ENGINE SELF-TEST: version-gating demo (requires dos.library V999, always unsupported)",
                 "implementation-plan.md#M1", 999, STRESSFS_ORACLE_MODEL,
                 run_is_filesystem, DOSTRUE, 0),
 
     /* --- cleanup --- */
-    ENTRY_EXACT("ACTION_FREE_LOCK (fixture dir lock)", "packet-documentation.md#ACTION_FREE_LOCK",
+    ENTRY_EXACT("free-lock-fixture-dir", "ACTION_FREE_LOCK (fixture dir lock)", "packet-documentation.md#ACTION_FREE_LOCK",
                 0, STRESSFS_ORACLE_INDEPENDENT, run_free_dir_lock, DOSTRUE, 0),
 };
 
@@ -895,13 +918,32 @@ static BPTR g_report_json_file = 0; /* stressfs-conform-report.json, JSON-lines 
 static BPTR g_report_file_vol = 0;
 static BPTR g_report_json_file_vol = 0;
 
-static void print_line(const stressfs_test_entry_t *entry, stressfs_verdict_t verdict,
-                        stressfs_pkt_result_t got)
-{
-    char buf[256];
-    char jbuf[512];
+/* STATIC, not automatic, and deliberately so: an AmigaDOS CLI process
+ * gets a 4KB stack by default, and M3's renderings are bigger than
+ * M2's (a report line now carries the applied quirk's id, confidence
+ * and match reason; the applied-quirks summary block is larger still).
+ * Holding ~3.5KB of formatting buffers on the stack overflows it --
+ * found the hard way while proving this milestone: the first
+ * Copperline run of M3's conform engine wedged the guest before a
+ * single report line was written, with automatic buffers of exactly
+ * these sizes, and moving them to static storage fixed it outright.
+ * These functions are only ever called from the single conform
+ * process, in sequence, so static storage is safe here (same
+ * single-context discipline devsoak's quirks.c documents for its own
+ * load-time state). */
+static char g_line_buf[512];
+static char g_line_jbuf[1024];
 
-    stressfs_conform_format_line(buf, sizeof(buf), entry, verdict, got);
+static void print_line(const stressfs_test_entry_t *entry, stressfs_verdict_t verdict,
+                        stressfs_pkt_result_t got,
+                        const stressfs_quirk_applied_t *quirk)
+{
+    char *buf = g_line_buf;
+    char *jbuf = g_line_jbuf;
+#define sizeof_buf  sizeof(g_line_buf)
+#define sizeof_jbuf sizeof(g_line_jbuf)
+
+    stressfs_conform_format_line(buf, sizeof_buf, entry, verdict, got, quirk);
     Printf((CONST_STRPTR)"%s\n", (CONST_STRPTR)buf);
     if (g_report_file != 0) {
         FPuts(g_report_file, (CONST_STRPTR)buf);
@@ -912,7 +954,7 @@ static void print_line(const stressfs_test_entry_t *entry, stressfs_verdict_t ve
         FPuts(g_report_file_vol, (CONST_STRPTR)"\n");
     }
 
-    stressfs_conform_format_json(jbuf, sizeof(jbuf), entry, verdict, got);
+    stressfs_conform_format_json(jbuf, sizeof_jbuf, entry, verdict, got, quirk);
     if (g_report_json_file != 0) {
         FPuts(g_report_json_file, (CONST_STRPTR)jbuf);
         FPuts(g_report_json_file, (CONST_STRPTR)"\n");
@@ -982,14 +1024,60 @@ static void report_note(const char *s)
  * set), never an environment that merely couldn't answer
  * ACTION_DISK_INFO -- see report.h's top comment for why geometry/
  * DosEnvec are deliberately excluded from this check. */
+static void emit_block(const char *human, const char *json)
+{
+    if (human != NULL) {
+        Printf((CONST_STRPTR)"%s\n", (CONST_STRPTR)human);
+        if (g_report_file != 0) {
+            FPuts(g_report_file, (CONST_STRPTR)human);
+            FPuts(g_report_file, (CONST_STRPTR)"\n");
+        }
+        if (g_report_file_vol != 0) {
+            FPuts(g_report_file_vol, (CONST_STRPTR)human);
+            FPuts(g_report_file_vol, (CONST_STRPTR)"\n");
+        }
+    }
+    if (json != NULL) {
+        if (g_report_json_file != 0) {
+            FPuts(g_report_json_file, (CONST_STRPTR)json);
+            FPuts(g_report_json_file, (CONST_STRPTR)"\n");
+        }
+        if (g_report_json_file_vol != 0) {
+            FPuts(g_report_json_file_vol, (CONST_STRPTR)json);
+            FPuts(g_report_json_file_vol, (CONST_STRPTR)"\n");
+        }
+    }
+}
+
+/* M3 step 6: the applied-quirks summary, emitted immediately after the
+ * run-identity header and BEFORE any test line, to both channels --
+ * docs/proposal.md's "Applied quirks are listed at the top of the
+ * report, not buried, so a quirk can never silently hide a
+ * regression". See report.h's declaration comment for why this lists
+ * the quirks ACTIVE for the run rather than retrospectively the ones
+ * that fired (the report is a stream). */
+static char g_quirks_human[1536];
+static char g_quirks_json[2048];
+
+static void emit_quirks_summary(const stressfs_quirks_db_t *db,
+                                 const stressfs_quirk_identity_t *qid)
+{
+    stressfs_report_format_quirks_human(g_quirks_human, sizeof(g_quirks_human), db, qid);
+    stressfs_report_format_quirks_json(g_quirks_json, sizeof(g_quirks_json), db, qid);
+    emit_block(g_quirks_human, g_quirks_json);
+}
+
+static char g_ident_human[768];
+static char g_ident_json[1024];
+
 static void emit_run_identity(const stressfs_run_identity_t *id)
 {
-    char human[768];
-    char json[1024];
+    char *human = g_ident_human;
+    char *json = g_ident_json;
 
     assert(stressfs_run_identity_is_complete(id));
 
-    stressfs_report_format_header_human(human, sizeof(human), id);
+    stressfs_report_format_header_human(human, sizeof(g_ident_human), id);
     Printf((CONST_STRPTR)"%s\n", (CONST_STRPTR)human);
     if (g_report_file != 0) {
         FPuts(g_report_file, (CONST_STRPTR)human);
@@ -1000,7 +1088,7 @@ static void emit_run_identity(const stressfs_run_identity_t *id)
         FPuts(g_report_file_vol, (CONST_STRPTR)"\n");
     }
 
-    stressfs_report_format_header_json(json, sizeof(json), id);
+    stressfs_report_format_header_json(json, sizeof(g_ident_json), id);
     if (g_report_json_file != 0) {
         FPuts(g_report_json_file, (CONST_STRPTR)json);
         FPuts(g_report_json_file, (CONST_STRPTR)"\n");
@@ -1011,14 +1099,31 @@ static void emit_run_identity(const stressfs_run_identity_t *id)
     }
 }
 
-int stressfs_conform_run(const char *volume, const char *tier, long seed, int selftest_hang)
+/* The quirks parser's/loader's diagnostics channel: everything they
+ * warn about (an unevaluable match key, a refused file) goes into the
+ * report's note channel, so a warning is in the report FILE as well as
+ * on the console -- a quirks warning that only existed on a console
+ * nobody was watching would be exactly the "buried" treatment the
+ * proposal forbids. */
+static void quirks_diag(void *ctx, const char *msg)
+{
+    (void)ctx;
+    report_note(msg);
+}
+
+int stressfs_conform_run(const char *volume, const char *tier, long seed,
+                          int selftest_hang,
+                          const char *quirks_file, const char *force_quirks,
+                          int no_quirks)
 {
     stressfs_handler_info_t info;
     stressfs_dosenvec_t envec;
     stressfs_run_identity_t ident;
+    stressfs_quirk_identity_t qid;
     int dos_version;
     int saw_fail = 0;
     int saw_inconclusive = 0;
+    int saw_deviation = 0;
     size_t i;
 
     if (stressfs_watchdog_open() != 0) {
@@ -1029,6 +1134,9 @@ int stressfs_conform_run(const char *volume, const char *tier, long seed, int se
     if (selftest_hang) {
         int hung;
         char line[256];
+        /* The watchdog self-test deliberately ignores the quirks
+         * database: it tests the harness, not a handler, and nothing
+         * in a quirks file may influence whether a hang is detected. */
         report_file_open(volume);
         hung = stressfs_watchdog_selftest(3);
         snprintf(line, sizeof(line),
@@ -1048,6 +1156,41 @@ int stressfs_conform_run(const char *volume, const char *tier, long seed, int se
 
     stressfs_identify_handler(volume, &info, STRESSFS_WATCHDOG_SECS);
     stressfs_fetch_dosenvec(volume, &envec);
+
+    /* ---- M3: the quirks database -------------------------------------
+     * Loaded BEFORE the first packet, so that an `action skip` entry
+     * can keep stressfs away from a packet that wedges a known handler
+     * (which is the whole point of that verb) and so that the
+     * applied-quirks summary can go at the top of the report. */
+    stressfs_quirks_init(&g_quirks);
+    g_quirks.suppressed = (no_quirks != 0);
+    if (force_quirks != NULL && force_quirks[0] != '\0') {
+        (void)stressfs_quirks_force(&g_quirks, force_quirks, quirks_diag, NULL);
+    }
+    if (!stressfs_quirks_load_file(&g_quirks, quirks_file, quirks_diag, NULL)) {
+        report_note("stressfs conform: the quirks file could not be used (see above) -- "
+                    "aborting before any packet is sent, rather than running with a "
+                    "half-known quirks set");
+        stressfs_watchdog_close();
+        report_file_close();
+        return RETURN_FAIL;
+    }
+
+    /* The identity the match conditions are evaluated against. The
+     * handler's own name/version come from its "$VER:" string (parsed
+     * by the portable lib/quirks.c, not here); kick/dos come from the
+     * running system. A handler whose identity could not be
+     * established gets an empty name and version 0, which no seeded
+     * entry's conditions can match -- the conservative outcome, and
+     * consistent with the proposal's "if identity cannot be
+     * established the suite runs only the baseline". */
+    memset(&qid, 0, sizeof(qid));
+    qid.identified = info.identified;
+    if (info.version[0] != '\0') {
+        (void)stressfs_quirks_identity_from_ver(&qid, info.version);
+    }
+    qid.dos_version = dos_version;
+    qid.kick_version = (long)SysBase->LibNode.lib_Version;
 
     /* Assemble the run-identity header (M2 step 1). handler_name/
      * handler_version always get a non-empty placeholder even when
@@ -1136,6 +1279,7 @@ int stressfs_conform_run(const char *volume, const char *tier, long seed, int se
     }
 
     emit_run_identity(&ident);
+    emit_quirks_summary(&g_quirks, &qid);
 
     if (!info.identified) {
         char hdr[160];
@@ -1178,28 +1322,54 @@ int stressfs_conform_run(const char *volume, const char *tier, long seed, int se
             const stressfs_test_entry_t *entry = &g_table[i];
             stressfs_pkt_result_t got;
             stressfs_verdict_t verdict;
+            stressfs_quirk_applied_t quirk;
 
             if (entry->run == NULL) {
                 continue;
             }
 
+            got.res1 = 0;
+            got.res2 = 0;
+
             if (dos_version != 0 && entry->min_version > dos_version) {
-                got.res1 = 0;
-                got.res2 = 0;
+                verdict = STRESSFS_VERDICT_UNSUPPORTED;
+                memset(&quirk, 0, sizeof(quirk));
+                quirk.id = "";
+                quirk.confidence = "";
+            } else if (stressfs_quirks_check_skip(&g_quirks, &qid, entry, &quirk)) {
+                /* `action skip`: consulted BEFORE the run function, so
+                 * no packet reaches the handler at all. Reported as
+                 * `unsupported` and carrying the quirk that caused it,
+                 * never silently omitted (docs/proposal.md:
+                 * "`unsupported` ... always listed, never silently
+                 * skipped"). */
                 verdict = STRESSFS_VERDICT_UNSUPPORTED;
             } else {
                 got = entry->run(entry->run_ctx);
                 if (g_env.run_aborted) {
                     verdict = STRESSFS_VERDICT_INCONCLUSIVE;
+                    memset(&quirk, 0, sizeof(quirk));
+                    quirk.id = "";
+                    quirk.confidence = "";
                 } else {
-                    verdict = stressfs_conform_evaluate(entry, got, dos_version);
+                    /* The three stages, kept separate exactly as M1/M2
+                     * left them and as M3's step 5 requires: compute
+                     * the raw verdict, THEN apply quirks, THEN format.
+                     * Nothing in stressfs_conform_evaluate() knows a
+                     * quirks file exists. */
+                    stressfs_verdict_t raw = stressfs_conform_evaluate(entry, got, dos_version);
+                    verdict = stressfs_quirks_apply_verdict(&g_quirks, &qid, entry, raw,
+                                                             got, &quirk);
                 }
             }
 
-            print_line(entry, verdict, got);
+            print_line(entry, verdict, got, &quirk);
 
             if (verdict == STRESSFS_VERDICT_FAIL) {
                 saw_fail = 1;
+            }
+            if (verdict == STRESSFS_VERDICT_DEVIATION) {
+                saw_deviation = 1;
             }
             if (verdict == STRESSFS_VERDICT_INCONCLUSIVE) {
                 saw_inconclusive = 1;
@@ -1226,6 +1396,21 @@ int stressfs_conform_run(const char *volume, const char *tier, long seed, int se
     }
     if (saw_fail) {
         return RETURN_WARN;
+    }
+    /* M3: a `deviation` is a declared, explained difference from the
+     * manual, not a failure -- docs/proposal.md lists it as its own
+     * verdict precisely so it is "reported, never hidden" without
+     * being counted as a fail. It therefore does not raise the exit
+     * code above RETURN_OK; the report line and the top-of-report
+     * applied-quirks section are where a deviation is visible. The
+     * variable is tracked (rather than ignored) so that the console
+     * summary below states it explicitly -- a reader must not have to
+     * infer "there were deviations" from a zero exit code. */
+    if (saw_deviation) {
+        report_note("stressfs conform: run completed with no failures, but at least one "
+                    "test reported `deviation` -- a quirks entry declared and explained a "
+                    "difference from the manual. Re-run with NOQUIRKS to see the raw "
+                    "findings.");
     }
     return RETURN_OK;
 }

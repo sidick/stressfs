@@ -1,0 +1,18 @@
+# A minimal well-formed file: one confirmed entry, one reported entry.
+quirk   demo-confirmed
+match   name=fs version>=40
+because A confirmed entry that auto-applies.
+action  expect-deviation demo-test 7/0
+status  confirmed
+
+quirk   demo-reported
+match   name=fs
+because A reported entry: inert unless forced by id.
+action  downgrade demo-other
+status  reported
+
+quirk   demo-skip
+match   name=fs kick>=37
+because A confirmed skip entry, to prove skip is consulted pre-execution.
+action  skip demo-dangerous
+status  confirmed

@@ -1,0 +1,6 @@
+quirk   broken
+match   name=fs
+because An unrecognised confidence word must refuse the file, not be
+        guessed at.
+action  downgrade some-test
+status  probably

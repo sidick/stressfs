@@ -5,6 +5,7 @@
  */
 
 #include "stressfs/conform.h"
+#include "stressfs/quirks.h"
 #include "stressfs/report.h"
 
 #include <stdio.h>
@@ -72,7 +73,8 @@ stressfs_verdict_t stressfs_conform_evaluate(const stressfs_test_entry_t *entry,
 void stressfs_conform_format_line(char *buf, size_t bufsz,
                                    const stressfs_test_entry_t *entry,
                                    stressfs_verdict_t verdict,
-                                   stressfs_pkt_result_t got)
+                                   stressfs_pkt_result_t got,
+                                   const struct stressfs_quirk_applied *quirk)
 {
     const char *name = (entry != NULL && entry->name != NULL) ? entry->name : "?";
     const char *section = (entry != NULL && entry->section != NULL) ? entry->section : "?";
@@ -90,13 +92,29 @@ void stressfs_conform_format_line(char *buf, size_t bufsz,
      * test name and the raw dp_Res1/dp_Res2 for debugging. */
     snprintf(buf, bufsz, "%-12s oracle=%-11s section=%-48s res1=%-6ld res2=%-4ld  %s",
              verdict_name, oracle, section, got.res1, got.res2, name);
+
+    /* M3: the applied quirk, appended rather than inserted into a new
+     * column, so every M1/M2 column keeps its position and existing
+     * eyes/greps keep working on unquirked lines (which look exactly
+     * as they did at M2). */
+    if (quirk != NULL && quirk->applied) {
+        size_t len = strlen(buf);
+        if (len < bufsz) {
+            snprintf(buf + len, bufsz - len, "  [quirk %s (%s), %s: %s]",
+                     quirk->id, quirk->confidence,
+                     stressfs_quirk_verb_name((stressfs_quirk_verb_t)quirk->verb),
+                     quirk->match_reason);
+        }
+    }
 }
 
 void stressfs_conform_format_json(char *buf, size_t bufsz,
                                    const stressfs_test_entry_t *entry,
                                    stressfs_verdict_t verdict,
-                                   stressfs_pkt_result_t got)
+                                   stressfs_pkt_result_t got,
+                                   const struct stressfs_quirk_applied *quirk)
 {
+    const char *test_id = (entry != NULL && entry->id != NULL) ? entry->id : "?";
     const char *name = (entry != NULL && entry->name != NULL) ? entry->name : "?";
     const char *section = (entry != NULL && entry->section != NULL) ? entry->section : "?";
     const char *oracle = stressfs_oracle_name(entry != NULL ? entry->oracle : STRESSFS_ORACLE_MODEL);
@@ -112,8 +130,14 @@ void stressfs_conform_format_json(char *buf, size_t bufsz,
      * comment): {"type":"test_result","verdict":...,"oracle":...,
      * "section":...,"name":...,"res1":N,"res2":N,"applied_quirks":[]}.
      * applied_quirks is always [] at M2; M3 populates it. */
-    snprintf(buf, bufsz, "{\"type\":\"test_result\",\"verdict\":\"%s\",\"oracle\":\"%s\",\"section\":\"",
+    snprintf(buf, bufsz, "{\"type\":\"test_result\",\"verdict\":\"%s\",\"oracle\":\"%s\",\"test\":\"",
               verdict_name, oracle);
+    stressfs_json_escape_append(buf, bufsz, test_id);
+
+    len = strlen(buf);
+    if (len < bufsz) {
+        snprintf(buf + len, bufsz - len, "\",\"section\":\"");
+    }
     stressfs_json_escape_append(buf, bufsz, section);
 
     len = strlen(buf);
@@ -125,7 +149,40 @@ void stressfs_conform_format_json(char *buf, size_t bufsz,
     len = strlen(buf);
     if (len < bufsz) {
         snprintf(buf + len, bufsz - len,
-                 "\",\"res1\":%ld,\"res2\":%ld,\"applied_quirks\":[]}",
+                 "\",\"res1\":%ld,\"res2\":%ld,\"applied_quirks\":[",
                  got.res1, got.res2);
+    }
+
+    if (quirk != NULL && quirk->applied) {
+        len = strlen(buf);
+        if (len < bufsz) {
+            snprintf(buf + len, bufsz - len, "{\"id\":\"");
+        }
+        stressfs_json_escape_append(buf, bufsz, quirk->id);
+        len = strlen(buf);
+        if (len < bufsz) {
+            snprintf(buf + len, bufsz - len, "\",\"confidence\":\"");
+        }
+        stressfs_json_escape_append(buf, bufsz, quirk->confidence);
+        len = strlen(buf);
+        if (len < bufsz) {
+            snprintf(buf + len, bufsz - len, "\",\"action\":\"");
+        }
+        stressfs_json_escape_append(buf, bufsz,
+                                     stressfs_quirk_verb_name((stressfs_quirk_verb_t)quirk->verb));
+        len = strlen(buf);
+        if (len < bufsz) {
+            snprintf(buf + len, bufsz - len, "\",\"match_reason\":\"");
+        }
+        stressfs_json_escape_append(buf, bufsz, quirk->match_reason);
+        len = strlen(buf);
+        if (len < bufsz) {
+            snprintf(buf + len, bufsz - len, "\"}");
+        }
+    }
+
+    len = strlen(buf);
+    if (len < bufsz) {
+        snprintf(buf + len, bufsz - len, "]}");
     }
 }

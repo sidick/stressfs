@@ -49,6 +49,11 @@
 
 #include <stddef.h>
 
+/* quirks.h -> conform.h, and neither includes this file, so the
+ * include graph stays acyclic and the summary formatters below can
+ * take properly-typed arguments. */
+#include "stressfs/quirks.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -56,13 +61,15 @@ extern "C" {
 /* docs/implementation-plan.md M2 step 1: "harness version (pick a
  * scheme ... your call but document it)". Scheme chosen: semver-ish
  * "MAJOR.MINOR.PATCH-mN", where mN names the milestone that last
- * changed the report schema (M2 introduced the schema itself, hence
- * "m2" here) -- this makes "what does this report's shape look like"
+ * changed the report schema (M2 introduced the schema itself; M3
+ * changed it by adding the per-line `test` id field, populating
+ * `applied_quirks`, and adding the applied-quirks summary object to
+ * the header block -- hence "m3" here) -- this makes "what does this report's shape look like"
  * answerable from the version string alone without consulting git
  * history. Bump the mN suffix whenever a future milestone changes the
  * JSON schema (new field, renamed field, etc.), bump MINOR for new
  * non-schema-breaking fields, PATCH for anything else. */
-#define STRESSFS_VERSION "0.1.0-m2"
+#define STRESSFS_VERSION "0.1.0-m3"
 
 /* One run's identity, per docs/proposal.md's "Reproducibility rules".
  * All string fields are non-owning pointers; the caller (amiga/src/
@@ -135,6 +142,47 @@ int stressfs_report_format_header_json(char *buf, size_t bufsz,
  * as the JSON formatter above. */
 int stressfs_report_format_header_human(char *buf, size_t bufsz,
                                          const stressfs_run_identity_t *id);
+
+/* M3 (docs/implementation-plan.md M3 step 6): the applied-quirks
+ * summary that sits at the TOP of the report, immediately after the
+ * run-identity header and before any test line --
+ * docs/proposal.md's "Applied quirks are listed at the top of the
+ * report, not buried, so a quirk can never silently hide a
+ * regression".
+ *
+ * Decision (the plan's wording "listing every quirk that applied
+ * anywhere in the run" vs. the proposal's "at the top of the report"):
+ * the report is written as a STREAM -- a conform run prints each line
+ * as it happens, so that a crash mid-run still leaves everything up to
+ * that point on disk/serial (docs/proposal.md's "logs each operation
+ * before performing it ... so a crash leaves the last operation on
+ * record"). A top-of-report section therefore cannot be a retrospective
+ * list of entries that actually fired; it is the list of entries that
+ * are ACTIVE for this run -- matched, confidence-eligible and not
+ * suppressed -- which is computable before the first packet is sent and
+ * is the same thing devsoak's own quirks_report() prints up front. That
+ * is also the stronger statement for a reader: it names every quirk
+ * that COULD have changed a verdict in what follows, not merely the
+ * ones that did, so no quirk can hide in a line nobody greps. Which
+ * ones actually fired is recoverable exactly, per line, from the
+ * `applied_quirks` field.
+ *
+ * Both renderings also state explicitly when the file was suppressed
+ * (-K/NOQUIRKS), when no file was found, and when the file was REFUSED
+ * as malformed -- a reader must never have to infer "no quirks applied"
+ * from the absence of a section.
+ *
+ * Pass NULL for `db` to render the "no quirks database at all" case.
+ * Neither formatter ever fails: there is no mandatory-field notion
+ * here (an empty quirks database is a perfectly valid, and the most
+ * common, state), so unlike the run-identity header these return
+ * nothing. */
+void stressfs_report_format_quirks_human(char *buf, size_t bufsz,
+                                          const stressfs_quirks_db_t *db,
+                                          const stressfs_quirk_identity_t *ident);
+void stressfs_report_format_quirks_json(char *buf, size_t bufsz,
+                                         const stressfs_quirks_db_t *db,
+                                         const stressfs_quirk_identity_t *ident);
 
 /* Appends `src`, JSON-string-escaped (backslash, double-quote and
  * control characters per RFC 8259; stressfs never needs to emit

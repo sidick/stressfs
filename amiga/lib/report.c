@@ -4,6 +4,7 @@
  */
 
 #include "stressfs/report.h"
+#include "stressfs/quirks.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -209,4 +210,168 @@ int stressfs_report_format_header_human(char *buf, size_t bufsz,
     }
 
     return 1;
+}
+
+/* ------------------------------------------------------------------ */
+/* M3: the applied-quirks summary at the top of the report. See        */
+/* report.h's declaration comment for the "active for this run" vs.   */
+/* "actually fired" decision, and quirks.h for what makes an entry    */
+/* active.                                                            */
+/* ------------------------------------------------------------------ */
+
+/* Shared by both renderings so they can never disagree about WHICH
+ * entries are listed -- only about how they are spelled. */
+static int quirks_state(const stressfs_quirks_db_t *db, const char **why)
+{
+    if (db == NULL) {
+        *why = "no quirks database";
+        return 0;
+    }
+    if (db->suppressed) {
+        *why = "suppressed by NOQUIRKS (-K): the file is not consulted at all, so a "
+               "quirk-covered deviation below shows up as the raw finding it is";
+        return 0;
+    }
+    if (!db->loaded) {
+        *why = "no quirks file was loaded (not found, or REFUSED as malformed -- see the "
+               "notes above)";
+        return 0;
+    }
+    *why = "";
+    return 1;
+}
+
+void stressfs_report_format_quirks_human(char *buf, size_t bufsz,
+                                          const stressfs_quirks_db_t *db,
+                                          const stressfs_quirk_identity_t *ident)
+{
+    const char *why;
+    int i;
+    int n_active = 0;
+
+    if (buf == NULL || bufsz == 0) {
+        return;
+    }
+    buf[0] = '\0';
+
+    if (!quirks_state(db, &why)) {
+        append(buf, bufsz, "stressfs applied quirks: none -- %s", why);
+        return;
+    }
+
+    for (i = 0; i < db->n_entries; i++) {
+        char reason[STRESSFS_QUIRK_REASON_LEN];
+        int j;
+
+        if (!stressfs_quirks_entry_active(db, i, ident, reason, sizeof(reason))) {
+            continue;
+        }
+        if (n_active == 0) {
+            append(buf, bufsz, "stressfs applied quirks: from %s (%d entries in file)",
+                   db->path[0] != '\0' ? db->path : "stressfs.quirks", db->n_entries);
+        }
+        n_active++;
+        append(buf, bufsz, "\nstressfs applied quirks:   %s [%s] %s",
+               db->entries[i].id,
+               stressfs_quirk_status_name((stressfs_quirk_status_t)db->entries[i].status),
+               reason);
+        for (j = 0; j < db->entries[i].n_actions; j++) {
+            const stressfs_quirk_action_t *a = &db->entries[i].actions[j];
+            append(buf, bufsz, "\nstressfs applied quirks:     action %s %s%s",
+                   stressfs_quirk_verb_name((stressfs_quirk_verb_t)a->verb),
+                   a->target, a->target_wild ? "*" : "");
+            if (a->verb == STRESSFS_QUIRK_EXPECT_DEVIATION) {
+                if (a->res1_any) {
+                    append(buf, bufsz, " res1=*");
+                } else {
+                    append(buf, bufsz, " res1=%ld", a->res1);
+                }
+                if (a->res2_any) {
+                    append(buf, bufsz, " res2=*");
+                } else {
+                    append(buf, bufsz, " res2=%ld", a->res2);
+                }
+            }
+        }
+    }
+
+    if (n_active == 0) {
+        append(buf, bufsz,
+               "stressfs applied quirks: none active -- %d entries in %s, none both matched "
+               "this handler and cleared the confidence gate (reported/suspected entries "
+               "need FORCEQUIRK=ID)",
+               db->n_entries, db->path[0] != '\0' ? db->path : "stressfs.quirks");
+    }
+}
+
+void stressfs_report_format_quirks_json(char *buf, size_t bufsz,
+                                         const stressfs_quirks_db_t *db,
+                                         const stressfs_quirk_identity_t *ident)
+{
+    const char *why;
+    int i;
+    int n_active = 0;
+    int loaded;
+
+    if (buf == NULL || bufsz == 0) {
+        return;
+    }
+    buf[0] = '\0';
+
+    loaded = quirks_state(db, &why);
+
+    append(buf, bufsz, "{\"type\":\"applied_quirks\",\"file\":\"");
+    stressfs_json_escape_append(buf, bufsz,
+                                 (db != NULL && db->path[0] != '\0') ? db->path : "");
+    append(buf, bufsz, "\",\"loaded\":%s,\"suppressed\":%s,\"entries_in_file\":%d,\"reason\":\"",
+           loaded ? "true" : "false",
+           (db != NULL && db->suppressed) ? "true" : "false",
+           (db != NULL) ? db->n_entries : 0);
+    stressfs_json_escape_append(buf, bufsz, why);
+    append(buf, bufsz, "\",\"quirks\":[");
+
+    if (loaded) {
+        for (i = 0; i < db->n_entries; i++) {
+            char reason[STRESSFS_QUIRK_REASON_LEN];
+            int j;
+
+            if (!stressfs_quirks_entry_active(db, i, ident, reason, sizeof(reason))) {
+                continue;
+            }
+            append(buf, bufsz, "%s{\"id\":\"", (n_active == 0) ? "" : ",");
+            n_active++;
+            stressfs_json_escape_append(buf, bufsz, db->entries[i].id);
+            append(buf, bufsz, "\",\"confidence\":\"%s\",\"match_reason\":\"",
+                   stressfs_quirk_status_name((stressfs_quirk_status_t)db->entries[i].status));
+            stressfs_json_escape_append(buf, bufsz, reason);
+            append(buf, bufsz, "\",\"actions\":[");
+            for (j = 0; j < db->entries[i].n_actions; j++) {
+                const stressfs_quirk_action_t *a = &db->entries[i].actions[j];
+                append(buf, bufsz, "%s{\"verb\":\"%s\",\"target\":\"",
+                       (j == 0) ? "" : ",",
+                       stressfs_quirk_verb_name((stressfs_quirk_verb_t)a->verb));
+                stressfs_json_escape_append(buf, bufsz, a->target);
+                if (a->target_wild) {
+                    stressfs_json_escape_append(buf, bufsz, "*");
+                }
+                append(buf, bufsz, "\"");
+                if (a->verb == STRESSFS_QUIRK_EXPECT_DEVIATION) {
+                    if (a->res1_any) {
+                        append(buf, bufsz, ",\"res1\":null");
+                    } else {
+                        append(buf, bufsz, ",\"res1\":%ld", a->res1);
+                    }
+                    if (a->res2_any) {
+                        append(buf, bufsz, ",\"res2\":null");
+                    } else {
+                        append(buf, bufsz, ",\"res2\":%ld", a->res2);
+                    }
+                }
+                append(buf, bufsz, "}");
+            }
+            append(buf, bufsz, "]}");
+        }
+    }
+
+    append(buf, bufsz, "],\"active_count\":%d}", n_active);
 }

@@ -13,6 +13,20 @@ name: CI
 # Kickstart ROM + HDF this repo cannot ship); run ci/copperline-m1.sh
 # locally instead, same precedent as ci/copperline-m0.sh.
 #
+# M3 — Quirks file + confidence tiers (same section): host-test also
+# runs quirks_test (the parser's unit tests, including malformed files
+# and the shipped data/stressfs.quirks file itself); a new quirks-doc
+# job regenerates docs/quirks.md from data/stressfs.quirks and fails on
+# any byte of drift (the M3 exit criterion "docs/quirks.md regenerates
+# byte-identically from the shipped file in CI") and cross-references
+# the quirks file's action targets against the conform table's test ids;
+# and volamos-smoke additionally proves the quirks CLI end to end
+# (loading the shipped file, NOQUIRKS, FORCEQUIRK, and a malformed file
+# being refused). The with-and-without-NOQUIRKS verdict comparison
+# against a real FFS handler needs a licensed Kickstart ROM + HDF and so
+# stays a local script, ci/copperline-m3.sh, like the M0-M2 Copperline
+# scripts before it.
+#
 # M2 — Report format + verdict/oracle machinery (same section):
 # host-test now also runs report_test (the golden-file-validated
 # writer tests); volamos-smoke additionally runs ci/report-checker.sh
@@ -40,6 +54,25 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build-host --output-on-failure
+
+  # M3: docs/quirks.md is a GENERATED page (ci/quirks-doc.sh) and the
+  # proposal promises "the published list can never drift from what the
+  # tool actually does". This job is that promise as a gate. Needs no
+  # emulator and no licensed assets, so unlike the Copperline tier it
+  # runs on every commit.
+  quirks-doc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Regenerate docs/quirks.md and diff byte-for-byte
+        run: ci/quirks-doc.sh --check
+
+      - name: Cross-reference quirks action targets against the conform table
+        # Warn-only at M3 on purpose -- the seeded ACTION_FLUSH and
+        # ACTION_MORE_CACHE entries are deliberate forward references to
+        # tests phase 2/5 will add. See ci/quirks-check.sh's header.
+        run: ci/quirks-check.sh
 
   cross-build:
     runs-on: ubuntu-latest
@@ -170,6 +203,60 @@ jobs:
       # counts -- "the seed of phase 4's summariser," run here against a
       # real (volamos-produced) report because volamos output needs no
       # licensed/personal assets, unlike the Copperline tier.
+      # M3 (docs/implementation-plan.md M3 steps 3 and 7): prove the
+      # quirks CLI end to end on the real cross-built binary, in the
+      # CI-safe tier. volamos's own volume answers almost no packets
+      # (see the note above), so no seeded FFS quirk can MATCH here --
+      # that part is ci/copperline-m3.sh's job against a real handler.
+      # What this step does prove, and what would otherwise only be
+      # proven by host unit tests, is that the file is found and parsed
+      # on the real target, that the load-time warning for the
+      # deliberately-unmatchable entry fires, that NOQUIRKS/-K and
+      # FORCEQUIRK reach the engine through ReadArgs, and that a
+      # malformed file aborts the run instead of being half-applied.
+      - name: Prove the quirks CLI under volamos
+        run: |
+          set -eu
+          mkdir -p /tmp/stressfs-quirks-work
+          cp data/stressfs.quirks /tmp/stressfs-quirks-work/
+
+          run() {
+            volamos --cpu 68020 -V WORK:/tmp/stressfs-quirks-work \
+              build-m68k/stressfs VOLUME WORK: TIER volamos SEED 1 CONFORM "$@"
+          }
+
+          echo "== 1. the shipped quirks file loads and warns about its unmatchable entry =="
+          out="$(run QUIRKS WORK:stressfs.quirks 2>&1 || true)"
+          echo "$out" | head -8
+          echo "$out" | grep -q "cannot be evaluated by this build" \
+            || { echo "::error::the unevaluable-match-key warning did not fire"; exit 1; }
+          echo "$out" | grep -q "^stressfs applied quirks:" \
+            || { echo "::error::no applied-quirks summary at the top of the report"; exit 1; }
+
+          echo "== 2. NOQUIRKS (-K) suppresses the file entirely =="
+          out="$(run QUIRKS WORK:stressfs.quirks -K 2>&1 || true)"
+          echo "$out" | grep -q "suppressed by NOQUIRKS" \
+            || { echo "::error::-K did not suppress the quirks file"; exit 1; }
+
+          echo "== 3. FORCEQUIRK lifts the confidence gate for a named id =="
+          out="$(run QUIRKS WORK:stressfs.quirks FORCEQUIRK pfs3-aio-identity-unexpressible 2>&1 || true)"
+          echo "$out" | grep -q "forced by id (FORCEQUIRK)" \
+            || { echo "::error::FORCEQUIRK did not force the named entry"; exit 1; }
+
+          echo "== 4. a malformed quirks file is refused, never half-applied =="
+          cp amiga/tests/quirks/bad-unknown-verb.quirks /tmp/stressfs-quirks-work/bad.quirks
+          set +e
+          out="$(run QUIRKS WORK:bad.quirks 2>&1)"
+          rc=$?
+          set -e
+          echo "$out" | head -4
+          echo "$out" | grep -q "REFUSING THE WHOLE FILE" \
+            || { echo "::error::a malformed quirks file was not loudly refused"; exit 1; }
+          if [ "$rc" != 20 ]; then
+            echo "::error::a malformed quirks file should abort the run with RETURN_FAIL (20), got $rc"
+            exit 1
+          fi
+
       - name: Check the JSON report with ci/report-checker.sh
         # The report file lands under the volamos -V mapping above
         # (/tmp/stressfs-conform-work), not build-m68k/ -- see

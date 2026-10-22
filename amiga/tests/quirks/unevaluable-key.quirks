@@ -1,0 +1,15 @@
+# Well-formed, but one entry names a match key this build cannot
+# evaluate. Expected: a warning, parsing continues, the whole file
+# applies, and the offending entry is force-only.
+quirk   needs-a3000
+match   machine=a3000 name=fs
+because There is no machine-type match key, so this entry can never
+        auto-match; it is force-only.
+action  downgrade a3000-only-test
+status  confirmed
+
+quirk   plain-entry
+match   name=fs
+because An ordinary entry in the same file, which must still apply.
+action  downgrade ordinary-test
+status  confirmed

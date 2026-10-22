@@ -1,0 +1,11 @@
+quirk   first-entry
+match   name=fs
+because This entry is fine.
+action  downgrade some-test
+status  confirmed
+
+quirk   broken
+match   name=fs
+because The action verb is not one of the three.
+action  ignore some-test
+status  confirmed

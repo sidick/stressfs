@@ -155,7 +155,7 @@ static void test_format_line_contains_fields(void)
     got.res1 = -1;
     got.res2 = 0;
 
-    stressfs_conform_format_line(buf, sizeof(buf), &e, STRESSFS_VERDICT_PASS, got);
+    stressfs_conform_format_line(buf, sizeof(buf), &e, STRESSFS_VERDICT_PASS, got, NULL);
 
     CHECK(strstr(buf, "pass") != NULL, "formatted line should contain the verdict");
     CHECK(strstr(buf, "independent") != NULL, "formatted line should contain the oracle class");
@@ -168,9 +168,9 @@ static void test_format_line_handles_null_and_small_buffer(void)
     char tiny[4];
     stressfs_pkt_result_t got = {0, 0};
     /* Must not crash on a too-small buffer or a NULL entry. */
-    stressfs_conform_format_line(tiny, sizeof(tiny), NULL, STRESSFS_VERDICT_FAIL, got);
+    stressfs_conform_format_line(tiny, sizeof(tiny), NULL, STRESSFS_VERDICT_FAIL, got, NULL);
     CHECK(tiny[sizeof(tiny) - 1] == '\0', "truncated line must stay NUL-terminated");
-    stressfs_conform_format_line(NULL, 0, NULL, STRESSFS_VERDICT_FAIL, got); /* must not crash */
+    stressfs_conform_format_line(NULL, 0, NULL, STRESSFS_VERDICT_FAIL, got, NULL); /* must not crash */
 }
 
 int main(void)

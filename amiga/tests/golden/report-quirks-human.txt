@@ -1,0 +1,12 @@
+stressfs applied quirks: from data/stressfs.quirks (3 entries in file)
+stressfs applied quirks:   demo-confirmed [confirmed] auto (confirmed); name=fs AND version>=40
+stressfs applied quirks:     action expect-deviation demo-test res1=7 res2=0
+stressfs applied quirks:   demo-reported [reported] forced by id (FORCEQUIRK); name=fs
+stressfs applied quirks:     action downgrade demo-other
+stressfs applied quirks:   demo-skip [confirmed] auto (confirmed); name=fs AND kick>=37
+stressfs applied quirks:     action skip demo-dangerous
+deviation    oracle=independent section=packet-documentation.md#TEST                     res1=7      res2=0     demo test (expect-deviation)  [quirk demo-confirmed (confirmed), expect-deviation: auto (confirmed); name=fs AND version>=40]
+deviation    oracle=independent section=packet-documentation.md#TEST                     res1=0      res2=205   demo other (downgrade)  [quirk demo-reported (reported), downgrade: forced by id (FORCEQUIRK); name=fs]
+unsupported  oracle=independent section=packet-documentation.md#TEST                     res1=0      res2=0     demo dangerous (skip)  [quirk demo-skip (confirmed), skip: auto (confirmed); name=fs AND kick>=37]
+stressfs applied quirks: none -- suppressed by NOQUIRKS (-K): the file is not consulted at all, so a quirk-covered deviation below shows up as the raw finding it is
+fail         oracle=independent section=packet-documentation.md#TEST                     res1=7      res2=0     demo test (expect-deviation)

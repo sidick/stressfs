@@ -92,7 +92,36 @@
  * volamos, Copperline and real hardware), so the invoking script
  * (ci/cross-build.sh's callers, ci/copperline-m2.sh, a future hardware
  * runner) states it explicitly. */
-#define STRESSFS_TEMPLATE "CONFORM/S,RANDOM/S,SEED/N/K,VOLUME/K,TIER/K,SELFTESTHANG/S"
+/* M3 (docs/implementation-plan.md M3 step 7) adds the quirks options.
+ *
+ * On the spelling, which is a real judgment call: the plan and the
+ * proposal both write these as devsoak's `-k ID` and `-K`. devsoak
+ * parses raw argv and can tell `-k` from `-K`; stressfs has used a
+ * ReadArgs template since M0, and ReadArgs keyword matching is
+ * CASE-INSENSITIVE -- "-k" and "-K" are the same token to it, so the
+ * two cannot coexist as template keywords. Rather than abandon
+ * ReadArgs (which is the AmigaDOS convention, is what every other
+ * stressfs option uses, and is what the plan's own M0 wording asked
+ * for), the options get AmigaDOS-style names with the single-letter
+ * forms as ReadArgs ALIASES where that is unambiguous:
+ *
+ *   QUIRKS/K       -- path to the quirks file (devsoak's -Q)
+ *   FORCEQUIRK/K   -- the plan's `-k ID`; repeatable in devsoak's own
+ *                     documented `-k ID[,ID]` form, i.e. a
+ *                     comma-separated list, which the task explicitly
+ *                     allows as the ReadArgs fallback. Given more than
+ *                     once on a command line ReadArgs keeps the last,
+ *                     so the comma form is the repeatable one.
+ *   NOQUIRKS=-K/S  -- the plan's `-K`, available under BOTH spellings:
+ *                     the alias makes the literal `-K` work, and
+ *                     because ReadArgs is case-insensitive `-k` on its
+ *                     own is accepted as the same switch (there is no
+ *                     `-k` option for it to collide with, since the
+ *                     force list is spelled FORCEQUIRK).
+ */
+#define STRESSFS_TEMPLATE \
+    "CONFORM/S,RANDOM/S,SEED/N/K,VOLUME/K,TIER/K,SELFTESTHANG/S," \
+    "QUIRKS/K,FORCEQUIRK/K,NOQUIRKS=-K/S"
 #define STRESSFS_DOS_VERSION 37L /* V37 = AmigaOS 2.04, this project's floor */
 
 /* ReadArgs() argument slots, in template order. */
@@ -103,6 +132,9 @@ enum {
     ARG_VOLUME,
     ARG_TIER,
     ARG_SELFTESTHANG,
+    ARG_QUIRKS,
+    ARG_FORCEQUIRK,
+    ARG_NOQUIRKS,
     ARG_COUNT
 };
 
@@ -166,7 +198,10 @@ int main(void)
      * unchanged. */
     if (args[ARG_CONFORM] != 0) {
         rc = stressfs_conform_run((const char *)volume, (const char *)tier, seed,
-                                   args[ARG_SELFTESTHANG] != 0);
+                                   args[ARG_SELFTESTHANG] != 0,
+                                   (const char *)args[ARG_QUIRKS],
+                                   (const char *)args[ARG_FORCEQUIRK],
+                                   args[ARG_NOQUIRKS] != 0);
         FreeArgs(rdargs);
         return rc;
     }

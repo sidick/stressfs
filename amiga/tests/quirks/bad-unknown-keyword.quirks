@@ -1,0 +1,7 @@
+quirk   first-entry
+match   name=fs
+because This entry is fine.
+action  downgrade some-test
+status  confirmed
+
+reason  this keyword does not exist in the format

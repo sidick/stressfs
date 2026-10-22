@@ -1,0 +1,4 @@
+match   name=fs
+because A match line before any quirk line.
+action  downgrade some-test
+status  confirmed

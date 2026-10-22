@@ -90,8 +90,27 @@ typedef stressfs_pkt_result_t (*stressfs_test_run_fn)(void *ctx);
  * nonzero for "this result counts as a pass". */
 typedef int (*stressfs_test_predicate_fn)(stressfs_pkt_result_t got, void *ctx);
 
+/* Opaque to this header: see stressfs/quirks.h, which includes this
+ * file (so the dependency only goes one way). The formatters below
+ * take a pointer to one of these so a report line can carry the quirk
+ * that changed its verdict without lib/conform.c needing the whole
+ * quirks database. */
+struct stressfs_quirk_applied;
+
 /* One row of the conform table. */
 typedef struct {
+    /* M3: a short, stable machine name for this test -- lowercase,
+     * hyphenated, e.g. "locate-exclusive-root". The quirks file's
+     * action targets are these ids (see stressfs/quirks.h), which is
+     * why they exist: pointing a quirks entry at the 70-character
+     * human-readable `name` below would make the file unreadable and
+     * would break every time the prose was reworded. The id is also
+     * emitted in both report renderings so a reader can map a line
+     * back to a quirks entry (and so ci/quirks-check.sh can
+     * cross-reference the two files -- docs/implementation-plan.md
+     * section 5's "quirks-file drift from the packet matrix" risk).
+     * Must be unique across the table. */
+    const char *id;
     const char *name;     /* e.g. "ACTION_LOCATE_OBJECT (shared, success)" */
     const char *section;  /* manual section / packet reference, e.g. "packet-documentation.md#ACTION_LOCATE_OBJECT" */
     int min_version;      /* dos.library version (33, 36, 37, ...) this
@@ -137,10 +156,19 @@ stressfs_verdict_t stressfs_conform_evaluate(const stressfs_test_entry_t *entry,
  * still packs every field the proposal's "Output" paragraph asks for:
  * verdict, oracle class, manual section, and the test name/packet.
  */
+/* M3 added the `quirk` parameter: the quirks entry that changed this
+ * line's verdict, or NULL (or an entry with .applied == 0) when none
+ * did. docs/proposal.md's Layer 1 "Output" paragraph requires every
+ * line to carry "every quirk that was applied (its id, confidence and
+ * the match reason)", so this is not an optional extra -- a line whose
+ * verdict a quirk changed and which does not say so would be exactly
+ * the "a quirk silently hides a regression" failure the proposal
+ * forbids. */
 void stressfs_conform_format_line(char *buf, size_t bufsz,
                                    const stressfs_test_entry_t *entry,
                                    stressfs_verdict_t verdict,
-                                   stressfs_pkt_result_t got);
+                                   stressfs_pkt_result_t got,
+                                   const struct stressfs_quirk_applied *quirk);
 
 /* M2: the machine-readable twin of stressfs_conform_format_line(),
  * living alongside it per this header's top comment -- M1 deliberately
@@ -148,15 +176,19 @@ void stressfs_conform_format_line(char *buf, size_t bufsz,
  * touching either. One JSON object per line (no trailing newline;
  * same convention as format_line above), schema stable from M2
  * onward: verdict, oracle class, manual section, test name, the raw
- * dp_Res1/dp_Res2 pair, and `applied_quirks` -- always an empty array
- * at M2 (M3 is what populates it; the field exists now so the schema
- * never changes shape later, per the task's forward-reference
- * instruction). Truncates into `buf`/`bufsz` like every other
+ * dp_Res1/dp_Res2 pair, and `applied_quirks` -- empty at M2, and
+ * populated by M3 with one {"id","confidence","match_reason"} object
+ * when a quirk changed this line's verdict (an array, not a single
+ * object, because the schema was fixed as an array at M2 and because
+ * later phases may want to record several contributing entries; M3
+ * never emits more than one, see stressfs_quirks_apply_verdict()).
+ * M3 also added the `test` field (the table entry's stable id). Truncates into `buf`/`bufsz` like every other
  * formatter here; never crashes on a NULL entry or a too-small buffer. */
 void stressfs_conform_format_json(char *buf, size_t bufsz,
                                    const stressfs_test_entry_t *entry,
                                    stressfs_verdict_t verdict,
-                                   stressfs_pkt_result_t got);
+                                   stressfs_pkt_result_t got,
+                                   const struct stressfs_quirk_applied *quirk);
 
 /* Stable, short strings for each verdict/oracle value, used by both
  * the formatter above and anything else (host tests, a future M2

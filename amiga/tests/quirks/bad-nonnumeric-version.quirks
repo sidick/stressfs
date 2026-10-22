@@ -1,0 +1,5 @@
+quirk   broken
+match   version>=forty
+because A numeric key with a non-numeric value.
+action  downgrade some-test
+status  confirmed

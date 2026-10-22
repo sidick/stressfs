@@ -116,6 +116,7 @@ static void build_table_entries(stressfs_test_entry_t entries[4],
 {
     /* 0: pass, independent oracle */
     memset(&entries[0], 0, sizeof(entries[0]));
+    entries[0].id = "baseline-is-filesystem";
     entries[0].name = "ACTION_IS_FILESYSTEM";
     entries[0].section = "packet-documentation.md#ACTION_IS_FILESYSTEM";
     entries[0].oracle = STRESSFS_ORACLE_INDEPENDENT;
@@ -125,6 +126,7 @@ static void build_table_entries(stressfs_test_entry_t entries[4],
 
     /* 1: fail, model oracle */
     memset(&entries[1], 0, sizeof(entries[1]));
+    entries[1].id = "selftest-negative";
     entries[1].name = "ENGINE SELF-TEST: deliberately wrong expectation";
     entries[1].section = "implementation-plan.md#M1";
     entries[1].oracle = STRESSFS_ORACLE_MODEL;
@@ -134,6 +136,7 @@ static void build_table_entries(stressfs_test_entry_t entries[4],
 
     /* 2: unsupported, correlated oracle */
     memset(&entries[2], 0, sizeof(entries[2]));
+    entries[2].id = "same-lock";
     entries[2].name = "ACTION_SAME_LOCK (requires V36)";
     entries[2].section = "packet-documentation.md#ACTION_SAME_LOCK";
     entries[2].oracle = STRESSFS_ORACLE_CORRELATED;
@@ -144,6 +147,7 @@ static void build_table_entries(stressfs_test_entry_t entries[4],
 
     /* 3: inconclusive, independent oracle (watchdog abort) */
     memset(&entries[3], 0, sizeof(entries[3]));
+    entries[3].id = "read-probe";
     entries[3].name = "ACTION_READ (probe.txt contents)";
     entries[3].section = "packet-documentation.md#ACTION_READ";
     entries[3].oracle = STRESSFS_ORACLE_INDEPENDENT;
@@ -174,7 +178,7 @@ static void test_human_lines_match_golden(void)
     off += (size_t)snprintf(rendered + off, sizeof(rendered) - off, "%s\n", line);
 
     for (i = 0; i < 4; i++) {
-        stressfs_conform_format_line(line, sizeof(line), &entries[i], verdicts[i], results[i]);
+        stressfs_conform_format_line(line, sizeof(line), &entries[i], verdicts[i], results[i], NULL);
         off += (size_t)snprintf(rendered + off, sizeof(rendered) - off, "%s\n", line);
     }
 
@@ -212,7 +216,7 @@ static void test_json_lines_match_golden(void)
     off += (size_t)snprintf(rendered + off, sizeof(rendered) - off, "%s\n", line);
 
     for (i = 0; i < 4; i++) {
-        stressfs_conform_format_json(line, sizeof(line), &entries[i], verdicts[i], results[i]);
+        stressfs_conform_format_json(line, sizeof(line), &entries[i], verdicts[i], results[i], NULL);
         off += (size_t)snprintf(rendered + off, sizeof(rendered) - off, "%s\n", line);
     }
 

@@ -70,7 +70,31 @@ extern "C" {
  * RETURN_ERROR wins (priority rule above) -- this is the one place M1's
  * ad-hoc RETURN_WARN+1=6 scheme (never matching any AmigaDOS
  * convention) has been replaced. */
-int stressfs_conform_run(const char *volume, const char *tier, long seed, int selftest_hang);
+/* M3 added the three quirks parameters (docs/implementation-plan.md
+ * M3 step 7, wired from main.c's ReadArgs template):
+ *
+ *   `quirks_file`  -- QUIRKS/K: an explicit path to the quirks file,
+ *                     or NULL/"" for the default search order (see
+ *                     amiga/src/quirks_file.c).
+ *   `force_quirks` -- FORCEQUIRK/K: the plan's `-k ID`, a
+ *                     comma-separated list of quirk ids whose
+ *                     `reported`/`suspected` confidence gate is lifted
+ *                     for this run (and whose unevaluable match keys
+ *                     are waived). Repeatable in the devsoak sense:
+ *                     `-k a,b,c`.
+ *   `no_quirks`    -- NOQUIRKS/S: the plan's `-K`. The quirks file is
+ *                     not even read, so a would-be-covered deviation
+ *                     shows up as the raw fail/inconclusive finding.
+ *
+ * A MALFORMED quirks file is fatal: the run returns RETURN_FAIL
+ * without sending a single packet. The alternative -- carrying on
+ * without the quirks the operator expected -- would produce a report
+ * whose verdicts are not comparable with any other run's, which is
+ * worse than not running. */
+int stressfs_conform_run(const char *volume, const char *tier, long seed,
+                          int selftest_hang,
+                          const char *quirks_file, const char *force_quirks,
+                          int no_quirks);
 
 #ifdef __cplusplus
 }

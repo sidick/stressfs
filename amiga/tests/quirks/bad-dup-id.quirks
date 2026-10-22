@@ -1,0 +1,11 @@
+quirk   same-id
+match   name=fs
+because First.
+action  downgrade a
+status  confirmed
+
+quirk   same-id
+match   name=fs
+because Second, with the same id.
+action  downgrade b
+status  confirmed

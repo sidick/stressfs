@@ -1,0 +1,6 @@
+quirk   broken
+match   name=fs
+because expect-deviation without a res pair is an error, not a silent
+        fallback to downgrade.
+action  expect-deviation some-test
+status  confirmed
