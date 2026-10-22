@@ -1,0 +1,113 @@
+name: CI
+
+# M0 — Build tooling proven (docs/implementation-plan.md section 3): host
+# build + ctest of amiga/lib (ASan/UBSan), an m68k-amigaos cross build of
+# the stressfs binary through the pinned toolchain container with a
+# binary-size report, and a volamos smoke run of the cross-built binary
+# proving the one real ACTION_IS_FILESYSTEM packet end to end.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  host-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure (STRESSFS_SANITIZERS=ON)
+        run: cmake -S amiga -B build-host -DSTRESSFS_SANITIZERS=ON
+
+      - name: Build
+        run: cmake --build build-host
+
+      - name: Test
+        run: ctest --test-dir build-host --output-on-failure
+
+  cross-build:
+    runs-on: ubuntu-latest
+    outputs:
+      binary-path: build-m68k/stressfs
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pinned by digest: amigadev/crosstools:m68k-amigaos-gcc10. Despite
+      # the "gcc10" tag, this image ships m68k-amigaos-gcc (AmigaDev)
+      # 16.2.1b, i.e. GCC 16.2 as referenced elsewhere in the plan — see
+      # the note in cmake/m68k-amigaos.toolchain.cmake. There is no
+      # vlink in this image; linking goes through m68k-amigaos-gcc /
+      # m68k-amigaos-ld (binutils).
+      - name: Cross-build for m68k-amigaos
+        run: ci/cross-build.sh
+
+      - name: Size report (visibility only — not a hard gate at M0)
+        run: |
+          SIZE_BYTES=$(stat -c%s build-m68k/stressfs)
+          LIMIT_BYTES=$((100 * 1024))
+
+          {
+            echo '### m68k-amigaos stressfs binary size'
+            echo
+            echo "\`build-m68k/stressfs\`: ${SIZE_BYTES} bytes"
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$SIZE_BYTES" -gt "$LIMIT_BYTES" ]; then
+            echo "::warning::stressfs is ${SIZE_BYTES} bytes, over the ~100KB" \
+                 "visibility threshold (docs/implementation-plan.md section 2)." \
+                 "Not a build failure at M0 — just flagging the growth."
+            echo "**Over the ~100KB visibility threshold.**" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload cross-built binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: stressfs-m68k
+          path: build-m68k/stressfs
+          if-no-files-found: error
+
+  volamos-smoke:
+    needs: cross-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download cross-built binary
+        uses: actions/download-artifact@v4
+        with:
+          name: stressfs-m68k
+          path: build-m68k
+
+      - name: Make binary executable
+        run: chmod +x build-m68k/stressfs
+
+      # volamos has no published crate, but its releases ship a prebuilt
+      # x86_64-unknown-linux-musl binary, which is far faster to fetch
+      # than building from source on every run. Pinned to a specific
+      # release tag so a volamos-side regression can't silently break
+      # this job — bump deliberately, not by accident. See the volamos
+      # skill / ~/src/volamos for the project.
+      - name: Install volamos (prebuilt release binary)
+        run: |
+          set -eu
+          VOLAMOS_VERSION="v0.12"
+          curl -fsSL -o volamos.tar.gz \
+            "https://github.com/sidick/volamos/releases/download/${VOLAMOS_VERSION}/volamos-${VOLAMOS_VERSION}-x86_64-unknown-linux-musl.tar.gz"
+          tar -xzf volamos.tar.gz
+          install -m 0755 "volamos-${VOLAMOS_VERSION}-x86_64-unknown-linux-musl/volamos" /usr/local/bin/volamos
+          volamos --version
+
+      # -m68020-60 code needs --cpu 68020 or later under volamos; the
+      # default --cpu 68000 fails the toolchain's own startup-time CPU
+      # check (see cmake/m68k-amigaos.toolchain.cmake and
+      # amiga/src/main.c's header comment for the two things that
+      # tripped this up while getting M0 working by hand).
+      - name: Run stressfs under volamos (default volume, SYS:)
+        run: volamos --cpu 68020 build-m68k/stressfs
+
+      - name: Run stressfs under volamos (explicit VOLUME:)
+        run: |
+          mkdir -p /tmp/stressfs-work
+          volamos --cpu 68020 -V WORK:/tmp/stressfs-work build-m68k/stressfs VOLUME WORK:

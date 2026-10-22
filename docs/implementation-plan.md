@@ -158,8 +158,11 @@ reporting, reproducibility.
   *Exit:* the binary cross-compiles and links in the pinned container via
   `ci/cross-build.sh`; runs under volamos (`volamos build-m68k/stressfs`) printing the
   `ACTION_IS_FILESYSTEM` result against a volamos volume; runs identically under
-  Copperline against a real FFS volume (manual run is fine at M0); host ctest green on a
-  first `lib/` unit test (the PRNG with known vectors).
+  Copperline against a real FFS volume via `ci/copperline-m0.sh` — a headless, scripted
+  `--run`/`--exit-on-return` invocation plus a scheduled-screenshot capture of the same
+  scenario, not a manual windowed session, per the project's standing rule that the only
+  reliable way to verify anything under Copperline is a headless, deterministic run; host
+  ctest green on a first `lib/` unit test (the PRNG with known vectors).
 - **M1 — Baseline + the first ~20 packets in `stressfs conform`.** The table-driven
   conformance engine: a static table of test entries (packet, arguments builder, expected
   `dp_Res1`/`dp_Res2`, manual section reference, minimum DOS version), executed in order

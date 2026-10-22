@@ -1,0 +1,33 @@
+# C / CMake
+build/
+build-*/
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+cmake_install.cmake
+Makefile
+compile_commands.json
+*.o
+*.obj
+*.a
+*.so
+*.dylib
+*.exe
+
+# Rust / cargo (host/ once it becomes a real cargo workspace)
+target/
+**/*.rs.bk
+
+# Editors / OS
+.DS_Store
+*.swp
+*~
+.vscode/
+.idea/
+
+# Misc
+*.log
+
+# Scratch files from manual M0 proving runs (volamos/Copperline), not
+# part of the repo's deliverables.
+scratch/
