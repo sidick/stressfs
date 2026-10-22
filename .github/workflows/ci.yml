@@ -5,6 +5,13 @@ name: CI
 # the stressfs binary through the pinned toolchain container with a
 # binary-size report, and a volamos smoke run of the cross-built binary
 # proving the one real ACTION_IS_FILESYSTEM packet end to end.
+#
+# M1 — Baseline + the first ~20 packets in `stressfs conform` (same
+# section): the volamos-smoke job additionally runs `stressfs conform`
+# itself. Copperline coverage of the same table against a real FFS
+# volume is intentionally NOT in CI (it needs a personal/licensed
+# Kickstart ROM + HDF this repo cannot ship); run ci/copperline-m1.sh
+# locally instead, same precedent as ci/copperline-m0.sh.
 
 on:
   push:
@@ -111,3 +118,38 @@ jobs:
         run: |
           mkdir -p /tmp/stressfs-work
           volamos --cpu 68020 -V WORK:/tmp/stressfs-work build-m68k/stressfs VOLUME WORK:
+
+      # M1 (docs/implementation-plan.md): `stressfs conform` must run
+      # to completion against a volamos volume without crashing. This
+      # is the CI-safe tier the implementation plan calls out
+      # explicitly ("running stressfs conform under volamos in CI is
+      # fine and expected... host-side volamos coverage is the
+      # CI-safe tier, Copperline stays a documented local verification
+      # script", since it needs a licensed Kickstart ROM + HDF this
+      # repo cannot ship). volamos only implements DoPkt() for a
+      # handful of packet types (see amiga/src/conform.c's header
+      # comment), so most table entries legitimately report `fail`
+      # here, not `pass` -- that is expected and is itself a finding
+      # about volamos's fidelity (docs/implementation-plan.md section
+      # 5's "volamos tier fidelity" risk), not a harness bug. The gate
+      # is "ran to completion without volamos reporting an unhandled
+      # library call", checked via the exit code: stressfs itself
+      # returns RETURN_OK(0)/RETURN_WARN(5) for a completed run (pass
+      # or fail verdicts) and a distinct code for a harness-detected
+      # inconclusive; volamos's own process exit code is whatever
+      # stressfs returned, so anything in 0-6 here means the run
+      # completed and this step should not fail CI on it.
+      - name: Run stressfs conform under volamos
+        run: |
+          mkdir -p /tmp/stressfs-conform-work
+          set +e
+          volamos --cpu 68020 -V WORK:/tmp/stressfs-conform-work \
+            build-m68k/stressfs VOLUME WORK: CONFORM
+          rc=$?
+          set -e
+          echo "stressfs conform exit code under volamos: $rc"
+          if [ "$rc" -gt 6 ]; then
+            echo "::error::stressfs conform under volamos exited $rc (expected 0-6: it should" \
+                 "complete the run, not crash or hang)"
+            exit 1
+          fi

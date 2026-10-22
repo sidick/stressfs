@@ -45,6 +45,7 @@ endif()
 # ---------------------------------------------------------------------------
 add_library(stressfs-lib STATIC
   lib/prng.c
+  lib/conform.c
 )
 
 target_include_directories(stressfs-lib PUBLIC include)
@@ -61,7 +62,12 @@ endif()
 # m68k-amigaos. There is nothing to run it against on the host build.
 # ---------------------------------------------------------------------------
 if(CMAKE_CROSSCOMPILING)
-  add_executable(stressfs src/main.c)
+  add_executable(stressfs
+    src/main.c
+    src/packet.c
+    src/handler_id.c
+    src/conform.c
+  )
   target_link_libraries(stressfs PRIVATE stressfs-lib)
 endif()
 
@@ -85,4 +91,15 @@ if(NOT CMAKE_CROSSCOMPILING)
   endif()
 
   add_test(NAME prng_test COMMAND prng_test)
+
+  add_executable(conform_test tests/conform_test.c)
+  target_link_libraries(conform_test PRIVATE stressfs-lib)
+  target_compile_options(conform_test PRIVATE -Wall -Wextra -Werror)
+
+  if(STRESSFS_SANITIZERS)
+    target_compile_options(conform_test PRIVATE -fsanitize=address,undefined -g)
+    target_link_options(conform_test PRIVATE -fsanitize=address,undefined)
+  endif()
+
+  add_test(NAME conform_test COMMAND conform_test)
 endif()

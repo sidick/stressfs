@@ -75,8 +75,16 @@
 #include <proto/dos.h>
 
 #include "stressfs/prng.h"
+#include "stressfs/conform_run.h"
 
-#define STRESSFS_TEMPLATE "CONFORM/S,RANDOM/S,SEED/N/K,VOLUME/K"
+/* M1 (docs/implementation-plan.md): CONFORM now dispatches to the real
+ * table-driven engine (amiga/src/conform.c) instead of being echoed
+ * and ignored. SELFTESTHANG is a new, hidden-from-the-plan-template
+ * switch added for M1's watchdog demonstration (see conform.c and
+ * packet.h's header comments) -- it is not part of the proposal's
+ * public CLI surface, just a developer/CI knob to prove the hang path
+ * on demand without needing a real misbehaving handler. */
+#define STRESSFS_TEMPLATE "CONFORM/S,RANDOM/S,SEED/N/K,VOLUME/K,SELFTESTHANG/S"
 #define STRESSFS_DOS_VERSION 37L /* V37 = AmigaOS 2.04, this project's floor */
 
 /* ReadArgs() argument slots, in template order. */
@@ -85,6 +93,7 @@ enum {
     ARG_RANDOM,
     ARG_SEED,
     ARG_VOLUME,
+    ARG_SELFTESTHANG,
     ARG_COUNT
 };
 
@@ -134,6 +143,19 @@ int main(void)
            (LONG)(args[ARG_RANDOM] != 0),
            seed,
            volume);
+
+    /* M1: CONFORM now runs the real table-driven engine instead of
+     * just the M0 hello-world ACTION_IS_FILESYSTEM demo below. It owns
+     * its own exit code and returns directly -- the rest of main()'s
+     * body (the PRNG smoke print and the bare ACTION_IS_FILESYSTEM
+     * call) stays exactly as M0 left it for the non-CONFORM case, so
+     * `stressfs VOLUME=...` with no switches is still the M0 proof
+     * unchanged. */
+    if (args[ARG_CONFORM] != 0) {
+        rc = stressfs_conform_run((const char *)volume, args[ARG_SELFTESTHANG] != 0);
+        FreeArgs(rdargs);
+        return rc;
+    }
 
     /* Prove the portable lib/ PRNG is linked in and runnable on the
      * real target too, not just under the host ctest build. */
