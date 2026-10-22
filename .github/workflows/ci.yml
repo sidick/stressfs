@@ -22,7 +22,7 @@ jobs:
   host-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Configure (STRESSFS_SANITIZERS=ON)
         run: cmake -S amiga -B build-host -DSTRESSFS_SANITIZERS=ON
@@ -38,7 +38,7 @@ jobs:
     outputs:
       binary-path: build-m68k/stressfs
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Pinned by digest: amigadev/crosstools:m68k-amigaos-gcc10. Despite
       # the "gcc10" tag, this image ships m68k-amigaos-gcc (AmigaDev)
@@ -79,7 +79,7 @@ jobs:
     needs: cross-build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Download cross-built binary
         uses: actions/download-artifact@v4
