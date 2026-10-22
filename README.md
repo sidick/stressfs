@@ -1,6 +1,6 @@
-# fstest
+# stressfs
 
-fstest is a format-agnostic test harness for Amiga file system handlers. One Amiga
+stressfs is a format-agnostic test harness for Amiga file system handlers. One Amiga
 binary runs four layers — packet conformance against the AmigaDOS Manual, seeded random
 operations against an in-memory model, long-running churn, and scripted fault injection
 in Copperline — against any mounted volume, so it tests Phoenix, FFS, PFS3 and SFS alike.

@@ -1,4 +1,4 @@
-# Implementation Plan — fstest
+# Implementation Plan — stressfs
 
 Working plan against the proposal of 2026-10-21 ([docs/proposal.md](proposal.md)). The
 proposal remains the authority on verdicts, oracle classes, the four layers and the
@@ -6,16 +6,16 @@ Copperline fault design; this document makes the structural decisions needed to 
 expands phase 1 ("Prove the harness") into executable milestones. Everything here is
 revisable, but build to these decisions until a reason appears.
 
-**Toolchain decision (fixed):** fstest uses the exact same compiler and build setup as
+**Toolchain decision (fixed):** stressfs uses the exact same compiler and build setup as
 the Phoenix repo (`~/src/unnamed-fs`): the pinned public `amigadev/crosstools` Docker
 image (`docker.io/amigadev/crosstools:m68k-amigaos-gcc10`, pinned by digest
 `sha256:3120749ec13b18a8f52e6073a484463f46751d69d8a67eaae10397958c05954d` — the tag says
 "gcc10" but the image actually ships `m68k-amigaos-gcc (AmigaDev) 16.2.1b`, i.e. the
 AmigaPorts/bebbo GCC 16.2 line), driven through a CMake toolchain file copied from
 Phoenix's `cmake/m68k-amigaos.toolchain.cmake` and adapted. The adaptation matters:
-Phoenix's core is a freestanding library, while `fstest` is a **hosted CLI binary** — it
+Phoenix's core is a freestanding library, while `stressfs` is a **hosted CLI binary** — it
 links against dos.library/exec.library through the toolchain's startup objects and
-amiga.lib stubs, takes ReadArgs arguments, and prints to a console. So fstest keeps
+amiga.lib stubs, takes ReadArgs arguments, and prints to a console. So stressfs keeps
 `-m68020-60 -Os -noixemul -Wall -Wextra -Werror -fno-common` and `CMAKE_SYSTEM_NAME
 Generic`, but drops the freestanding-only constraints (no `-ffreestanding`, no "no libc
 in sources" rule) and lets CMake's try-compile link a real executable where that works.
@@ -28,12 +28,12 @@ one primary toolchain, and the first milestones use it exclusively.
 
 | Question | Decision | Rationale |
 | --- | --- | --- |
-| Name | **fstest**, provisional per the proposal; repo stays `stressfs` until the Aminet name check happens (proposal open question). Binary and subcommand names are `fstest conform` / `random` / `churn` / `replay` from day one so docs don't churn. | Renaming a binary is cheap; renaming a report format consumed by CI is not. The report schema carries a `harness` field so a rename never invalidates stored reports. |
+| Name | **stressfs**, matching the repo — settled, overriding the proposal's `fstest` working name (the proposal's Aminet-name-check open question is resolved by this choice). Binary and subcommand names are `stressfs conform` / `random` / `churn` / `replay` from day one so docs don't churn. | Repo and binary names drifting apart is its own source of confusion; the report schema carries a `harness` field regardless, so a rename never invalidates stored reports. |
 | Primary toolchain | Pinned `amigadev/crosstools` image + CMake toolchain file, mirroring unnamed-fs exactly (same digest, same flag philosophy). | Explicit requirement; one container serves both repos, and every lesson learned in unnamed-fs's build (the gcc10-tag trap, no-vlink, try-compile behaviour) transfers for free. |
 | GCC 6.5 / vbcc builds | Deferred to a dedicated milestone after phase 1's harness works (M6). Not required for M0–M5. | The point of the secondary builds is catching codegen- and compiler-dependent bugs in the *harness*; that is only meaningful once the harness has behaviour worth cross-checking. |
 | Minimum OS | Runs on 2.04 (V37) and up per the proposal; version-gated tests skip themselves. CI tiers run V40 and V47 first because those are the FFS targets of M5. | — |
 | Licence | **BSD 2-Clause**, matching devsoak per the proposal ("both ship under BSD 2-Clause as devsoak does"). | Fixed by the proposal. |
-| Quirks file name | `fstest.quirks`, same format and semantics as `devsoak.quirks` (match conditions, actions, confidence tiers, `-k ID`/`-K` overrides). | Fixed by the proposal; sharing the format means sharing the parser eventually. |
+| Quirks file name | `stressfs.quirks`, same format and semantics as `devsoak.quirks` (match conditions, actions, confidence tiers, `-k ID`/`-K` overrides). | Fixed by the proposal; sharing the format means sharing the parser eventually. |
 
 ## 1. Repository structure
 
@@ -44,20 +44,20 @@ stressfs/
 ├── docs/
 │   ├── proposal.md            # The product proposal (authority on behaviour)
 │   ├── implementation-plan.md # This file
-│   └── quirks.md              # GENERATED from fstest.quirks at release — never hand-edited
-├── amiga/                     # The Amiga-side C: the fstest binary itself
+│   └── quirks.md              # GENERATED from stressfs.quirks at release — never hand-edited
+├── amiga/                     # The Amiga-side C: the stressfs binary itself
 │   ├── src/                   # main + subcommand dispatch (ReadArgs), conform/, random/,
 │   │                          #   churn/ (phase 3), replay/
 │   ├── lib/                   # the helper library from the proposal: packet sending
 │   │                          #   (DoPkt wrappers, BSTR/BPTR helpers), seeded generator
 │   │                          #   (host-portable PRNG), model, report writer, quirks parser
-│   ├── include/fstest/        # public headers for lib/ (other test tools may consume)
+│   ├── include/stressfs/        # public headers for lib/ (other test tools may consume)
 │   └── tests/                 # host-runnable C unit tests of the portable pieces
 │                              #   (model, generator, quirks parser, report formatter)
-├── host/                      # Rust: fstest-drive orchestrator (phase 4) — empty stub
+├── host/                      # Rust: stressfs-drive orchestrator (phase 4) — empty stub
 │   │                          #   with a README until then; cargo workspace when real
 ├── data/
-│   └── fstest.quirks          # The single-source quirks file, shipped in the archive
+│   └── stressfs.quirks          # The single-source quirks file, shipped in the archive
 ├── cmake/
 │   └── m68k-amigaos.toolchain.cmake  # Copied from unnamed-fs, freestanding bits removed
 ├── ci/                        # Scripts: cross build in the pinned container, volamos runs
@@ -73,26 +73,26 @@ Notes:
   **host** as plain C (they touch no Amiga APIs), which is how they get ASan/UBSan
   coverage. Packet sending is Amiga-only and cross-compiles only.
 - The seed/PRNG and the model live in `lib/` precisely because phase 4's Rust
-  `fstest-drive` and the host crates must reproduce the same operation stream from the
+  `stressfs-drive` and the host crates must reproduce the same operation stream from the
   same seed. The PRNG is a fixed, documented algorithm (e.g. xoshiro128\*\* with a
   documented seeding rule), not whatever libc provides — this is a correctness
   requirement, not a style choice.
 - `host/` stays an empty stub (one README) until phase 4, exactly as unnamed-fs kept
   `handler/` empty through its phase 1. The Copperline disk-fault shim is specified
   jointly with devsoak and lives in Copperline's repo, not here.
-- `docs/quirks.md` is generated from `data/fstest.quirks` by a build step (a small
+- `docs/quirks.md` is generated from `data/stressfs.quirks` by a build step (a small
   host-side script in `ci/`), satisfying the proposal's "the published list can never
   drift from what the tool actually does".
 
 ## 2. Build tooling
 
-- **Amiga binary: CMake** (≥ 3.25), cross-only for the `fstest` executable:
+- **Amiga binary: CMake** (≥ 3.25), cross-only for the `stressfs` executable:
   - `cmake/m68k-amigaos.toolchain.cmake` is copied from
     `unnamed-fs/cmake/m68k-amigaos.toolchain.cmake` with these edits: keep
     `CMAKE_SYSTEM_NAME Generic`, `CMAKE_SYSTEM_PROCESSOR m68k`, the compiler/ar/ranlib
     settings, the flags line `-m68020-60 -Os -noixemul -Wall -Wextra -Werror
     -fno-common`, and the `CMAKE_FIND_ROOT_PATH_MODE_*` settings. Change
-    `CMAKE_TRY_COMPILE_TARGET_TYPE`: fstest is a hosted binary, so first try letting
+    `CMAKE_TRY_COMPILE_TARGET_TYPE`: stressfs is a hosted binary, so first try letting
     CMake link its test executable normally (the toolchain's `-noixemul` startup +
     libnix can link a trivial `main()`); fall back to `STATIC_LIBRARY` only if that
     proves flaky in the container — record whichever in the file's header comment, as
@@ -122,19 +122,19 @@ Notes:
   the host build exists to test the portable logic, not to fake AmigaOS.
 - **Running the cross build.** Compiling is not proving. The M0 exit criterion includes
   *executing* the binary:
-  - Per-commit: `volamos` on the host runs the fstest binary directly (it is a plain CLI
+  - Per-commit: `volamos` on the host runs the stressfs binary directly (it is a plain CLI
     hunk executable), the same way `unnamed-fs/ci/volamos-m68k-tests.sh` runs its m68k
-    test suite (`volamos --cpu 68020 --stack 2M build-m68k/fstest ...`). volamos's
+    test suite (`volamos --cpu 68020 --stack 2M build-m68k/stressfs ...`). volamos's
     handler hosting (the per-commit tier of the proposal) is a phase 4 dependency; until
     then volamos runs give us startup, ReadArgs, console output and the baseline packets
     against volamos's own volume emulation.
   - Nightly (from M5): Copperline boots an AmiBake-style environment with real FFS/PFS3
-    volumes mounted and runs `fstest` from a Shell script; `ci/copperline-run.sh` owns
+    volumes mounted and runs `stressfs` from a Shell script; `ci/copperline-run.sh` owns
     that invocation.
 - **Rust (`host/`)**: untouched until phase 4; when it lands it is a cargo workspace
   independent of CMake, same division as unnamed-fs's `rust/`.
 - **CI (GitHub Actions)**, phase-1 jobs: host build + ctest (ASan/UBSan); m68k cross
-  build in the pinned container + binary-size report (fstest should stay well under
+  build in the pinned container + binary-size report (stressfs should stay well under
   100 KB; report size every commit so growth is visible, per unnamed-fs practice);
   volamos smoke run of the cross-built binary. GCC 6.5 and vbcc jobs are added at M6,
   compile-only at first.
@@ -142,7 +142,7 @@ Notes:
 ## 3. Phase 1 milestones ("Prove the harness"), in dependency order
 
 Phase 1's goal, from the proposal: a deliberately small release — baseline + ~20 file,
-lock and examine packets in `fstest conform`; `fstest random` with the portable model
+lock and examine packets in `stressfs conform`; `stressfs random` with the portable model
 only and a handful of scenarios; the report format with verdicts and oracle classes; the
 quirks file with the entries this exercise produces; run against FFS V40, FFS V47 and
 PFS3-AIO. It tests the riskiest assumptions first: safe probing, model semantics, quirks
@@ -150,17 +150,17 @@ reporting, reproducibility.
 
 - **M0 — Build tooling proven.** Repo layout above; toolchain file adapted from
   unnamed-fs; CMake host + cross flavours; CI with host-test, cross-build and size-report
-  jobs. The deliverable binary is a hello-world `fstest` that: parses a ReadArgs template
+  jobs. The deliverable binary is a hello-world `stressfs` that: parses a ReadArgs template
   (`CONFORM/S,RANDOM/S,SEED/N/K,VOLUME/K,...` skeleton), opens dos.library explicitly
   with a version check, sends `ACTION_IS_FILESYSTEM` via `DoPkt()` to a named volume's
   handler port and prints the reply — i.e. one real packet end-to-end, proving startup
   code, library linkage, BPTR/BSTR handling and packet plumbing in one shot.
   *Exit:* the binary cross-compiles and links in the pinned container via
-  `ci/cross-build.sh`; runs under volamos (`volamos build-m68k/fstest`) printing the
+  `ci/cross-build.sh`; runs under volamos (`volamos build-m68k/stressfs`) printing the
   `ACTION_IS_FILESYSTEM` result against a volamos volume; runs identically under
   Copperline against a real FFS volume (manual run is fine at M0); host ctest green on a
   first `lib/` unit test (the PRNG with known vectors).
-- **M1 — Baseline + the first ~20 packets in `fstest conform`.** The table-driven
+- **M1 — Baseline + the first ~20 packets in `stressfs conform`.** The table-driven
   conformance engine: a static table of test entries (packet, arguments builder, expected
   `dp_Res1`/`dp_Res2`, manual section reference, minimum DOS version), executed in order
   with the proposal's safe-probing ladder — handler identification first (DosType from
@@ -179,7 +179,7 @@ reporting, reproducibility.
   proposal. Watchdog: a second process with a timeout marks a hung test inconclusive and
   aborts the run. Version gating works (tests annotated below the running handler's DOS
   version report `unsupported`).
-  *Exit:* `fstest conform` runs the baseline + the table against a volamos volume and
+  *Exit:* `stressfs conform` runs the baseline + the table against a volamos volume and
   against FFS V40 under Copperline without crashing either; a deliberately-wrong
   expectation produces a `fail` line (negative test of the engine); a hang produces
   `inconclusive` and an abort, demonstrated with a stub handler or a breakpointed run.
@@ -196,7 +196,7 @@ reporting, reproducibility.
   *Exit:* M1's run emits the format; a host-side ctest validates the writer against
   golden files; a trivial `ci/` checker script parses a real report and computes the
   verdict counts (the seed of phase 4's summariser).
-- **M3 — Quirks file + confidence tiers.** The `fstest.quirks` parser in `lib/` (host
+- **M3 — Quirks file + confidence tiers.** The `stressfs.quirks` parser in `lib/` (host
   unit-tested): match conditions (handler name, version range, Kickstart version),
   actions (skip a packet, downgrade a test, expect a deviation), confidence tiers where
   only `confirmed` applies automatically and `reported`/`suspected` need `-k ID`, and
@@ -209,7 +209,7 @@ reporting, reproducibility.
   changes verdicts (a quirk-covered deviation vs. a raw finding); host tests cover the
   parser including malformed files (refused loudly, never half-applied); `docs/quirks.md`
   regenerates byte-identically from the shipped file in CI.
-- **M4 — `fstest random`, portable model only.** The seeded generator + in-memory model
+- **M4 — `stressfs random`, portable model only.** The seeded generator + in-memory model
   from the proposal's layer 2, restricted to phase 1 scope: operations
   create/open-each-mode/write/read/seek/close/delete, rename within and across
   directories, `CreateDir`, directory walk via `ExNext`, `SetFileSize` grow and truncate.
@@ -219,13 +219,13 @@ reporting, reproducibility.
   model, read-back, listing equality, `fib_Size`), full-tree compare every N steps.
   Working-set measurement and the refuse-to-run-what-won't-fit rule. No shrinking yet
   (phase 2) — but on divergence the full operation log with the seed is the output, which
-  `fstest replay` (a thin subcommand that re-executes a logged sequence) can re-run.
+  `stressfs replay` (a thin subcommand that re-executes a logged sequence) can re-run.
   *Exit:* `SEED=n` reproduces the identical operation stream on host (generator unit
   test), under volamos, and under Copperline; a seeded run of ≥ 10k operations against
   FFS V47 completes with the model agreeing or produces a logged, replayable divergence;
   an intentionally-broken model expectation demonstrates divergence detection end to end.
 - **M5 — The verdict matrix: FFS V40, FFS V47, PFS3-AIO.** The phase-1 deliverable. Run
-  `fstest conform` and `fstest random` (a handful of fixed seeds plus a nightly random
+  `stressfs conform` and `stressfs random` (a handful of fixed seeds plus a nightly random
   one) against all three handlers under Copperline, from scripted boot environments
   checked into `ci/` (AmiBake proper is phase 4; for now a documented Copperline config +
   prepared HDF images per handler is enough, generated from the harness's TOML templates
@@ -238,7 +238,7 @@ reporting, reproducibility.
   harness itself; the quirks file contains the entries this exercise produced; nightly CI
   runs the Copperline tier green. **Phase 1 gate:** the findings here decide how much of
   the full packet matrix and the fault system is worth building, per the proposal.
-- **M6 — Secondary toolchains (compile matrix).** Add CI jobs building `fstest` with
+- **M6 — Secondary toolchains (compile matrix).** Add CI jobs building `stressfs` with
   bebbo GCC 6.5 and vbcc (compile + link; execution under volamos where it works). This
   is deliberately after the phase-1 gate: the harness must have proven behaviour before
   cross-compiler differences are worth chasing. Flag philosophy: same warnings-as-errors
@@ -263,13 +263,13 @@ its phase opens, informed by the phase-1 findings.
   the permitted-differences list; concurrency mode (2–3 processes, disjoint subtrees,
   then shared files with record locks). Exit shape: the layer-1 coverage statement
   (packet × version × outcome × state cells exercised) is reportable per run.
-- **Phase 3 — Churn and soak (`fstest churn`).** The generalised
+- **Phase 3 — Churn and soak (`stressfs churn`).** The generalised
   FileSystemsStressTest workload; between-phase invariants (free-space bound per format
   from the quirks file, `Info()` self-consistency, full `ExAll` walk); fragmentation
   report where the handler exposes extents; 10-minute nightly and 8-hour hardware tiers;
   resumable run state on a separate volume with its own checksum. Quirks file extended
   from phases 1–2 findings.
-- **Phase 4 — Host driver and tiers.** `fstest-drive` in `host/` (Rust): tier
+- **Phase 4 — Host driver and tiers.** `stressfs-drive` in `host/` (Rust): tier
   orchestration, emulator config generation from the TOML templates, report collection
   and the campaign summariser (pass rates, first-failure seeds, shrunk sequences); the
   volamos per-commit tier via its handler hosting (until that exists, layer 2 runs
@@ -312,7 +312,7 @@ its phase opens, informed by the phase-1 findings.
   Phase 5 depends on `disk.fault.set`/`clear`/`list`/`stats` landing in Copperline,
   specified jointly with devsoak — another team/repo and the proposal's one acknowledged
   control-protocol gap. Mitigations: the spec work (the policy language in the proposal)
-  can be circulated during phases 2–3 so implementation starts before fstest needs it;
+  can be circulated during phases 2–3 so implementation starts before stressfs needs it;
   phases 1–4 are sequenced to be fully useful without it; and if it slips, a degraded
   interim exists (power-cut-only campaigns via the existing `state.save`/`machine.reset`
   surface, which needs nothing new) — explicitly marked as the narrow subset it is.
