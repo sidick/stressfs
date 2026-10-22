@@ -406,9 +406,14 @@ jobs:
         # exit 128, "could not read Username for 'https://github.com'",
         # since the 404 trips a credential prompt in a non-interactive
         # shell). The explicit URL is what actually works, matching how
-        # this machine's own local tap is configured.
+        # this machine's own local tap is configured. Homebrew also
+        # refuses to load a formula from a third-party tap it hasn't
+        # been told to trust ("Refusing to load formula ... from
+        # untrusted tap"), a newer opt-in-trust security feature --
+        # `brew trust` that tap before installing from it.
         run: |
           brew tap linuxjedi/copperline https://github.com/CopperlineHQ/Copperline
+          brew trust linuxjedi/copperline
           brew install copperline
           copperline --version
 
