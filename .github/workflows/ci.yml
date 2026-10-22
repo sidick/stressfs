@@ -397,8 +397,18 @@ jobs:
         run: chmod +x build-m68k/stressfs
 
       - name: Install Copperline (Homebrew tap)
+        # The tap's Formula lives inside the main project repo itself
+        # (CopperlineHQ/Copperline, after the project's move from
+        # linuxjedi/Copperline), not in a separate "homebrew-copperline"
+        # repo -- `brew tap linuxjedi/copperline` with no URL looks for
+        # the now-nonexistent github.com/linuxjedi/homebrew-copperline
+        # by Homebrew's naming convention and fails (observed on CI:
+        # exit 128, "could not read Username for 'https://github.com'",
+        # since the 404 trips a credential prompt in a non-interactive
+        # shell). The explicit URL is what actually works, matching how
+        # this machine's own local tap is configured.
         run: |
-          brew tap linuxjedi/copperline
+          brew tap linuxjedi/copperline https://github.com/CopperlineHQ/Copperline
           brew install copperline
           copperline --version
 

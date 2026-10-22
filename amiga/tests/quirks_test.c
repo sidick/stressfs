@@ -354,7 +354,12 @@ static void check_refused(const char *fixture, const char *expect_substr)
     stressfs_quirks_db_t db;
     struct diag_sink sink;
     char *text = read_fixture(fixture);
-    char msg[256];
+    /* Large enough to hold the full diag_sink.text (char[4096], see
+     * above) embedded in the "should mention" message below without
+     * GCC's -Wformat-truncation= flagging a possible truncation under
+     * -Werror (reproduces on CI's gcc; not every local toolchain warns
+     * here, which is why this didn't surface until a real CI run). */
+    char msg[4096 + 256];
 
     if (text == NULL) {
         snprintf(msg, sizeof(msg), "%s must be readable", fixture);
