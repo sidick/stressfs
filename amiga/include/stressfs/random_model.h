@@ -94,6 +94,30 @@ typedef struct stressfs_model_t {
     int open_node;          /* -1 = nothing open */
     stressfs_open_mode_t open_mode;
     uint32_t open_pos;
+    /* FOUND WHILE FIXING THE M5-FLAGGED RANDOM-MODEL BUG (see
+     * stressfs_model_expect()'s READ case): once a READ needs any byte
+     * at or past `written` (the SETSIZE-grown-but-never-WRITTEN zone),
+     * the real byte count it returns is genuinely not portable -- live
+     * testing against two independent real FFS handlers under
+     * Copperline showed BOTH outcomes occur (sometimes the full
+     * requested count with garbage content, sometimes 0), not a single
+     * predictable one. Once that happens, this model's own `open_pos`
+     * is no longer known to match the real file pointer -- confirmed
+     * live: a Seek() immediately after a 0-byte read into that zone
+     * returned the file's SIZE as its "old position", not the pointer
+     * value this model had been tracking. `pos_trusted` records
+     * whether `open_pos` can still be asserted against the real side
+     * for WRITE/READ/SEEK; it clears the moment a READ crosses into
+     * that undefined zone and is restored only by a fresh CREATE/OPEN
+     * (position newly and definitely 0) or a SEEK (whose target is
+     * always re-expressed as an absolute OFFSET_BEGINNING value by the
+     * generator, so it unconditionally lands the real file there
+     * regardless of where it was before -- see random_ops.c's SEEK
+     * case). SETSIZE/CLOSE/DELETE/RENAME/MKDIR/EXNEXT are unaffected:
+     * none of their portable expectations depend on `open_pos`, and
+     * every live run so far confirms SetFileSize()'s own return value
+     * stays reliable even once position tracking has drifted. */
+    int pos_trusted;
 } stressfs_model_t;
 
 void stressfs_model_init(stressfs_model_t *m);

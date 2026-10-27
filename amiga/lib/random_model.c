@@ -10,6 +10,7 @@ void stressfs_model_init(stressfs_model_t *m)
 {
     memset(m, 0, sizeof(*m));
     m->open_node = -1;
+    m->pos_trusted = 1;
 }
 
 int stressfs_model_names_equal(const char *a, const char *b)
@@ -166,6 +167,7 @@ void stressfs_model_apply(stressfs_model_t *m, const stressfs_op_t *op)
         }
         m->open_mode = STRESSFS_OPEN_WRITE;
         m->open_pos = 0;
+        m->pos_trusted = 1;
         break;
     }
 
@@ -173,6 +175,7 @@ void stressfs_model_apply(stressfs_model_t *m, const stressfs_op_t *op)
         m->open_node = op->target_node;
         m->open_mode = op->open_mode;
         m->open_pos = 0;
+        m->pos_trusted = 1;
         break;
 
     case STRESSFS_OP_WRITE: {
@@ -211,12 +214,33 @@ void stressfs_model_apply(stressfs_model_t *m, const stressfs_op_t *op)
         const stressfs_model_node_t *n = &m->nodes[m->open_node];
         uint32_t remaining = (m->open_pos < n->size) ? (n->size - m->open_pos) : 0;
         uint32_t actual = (op->length < remaining) ? op->length : remaining;
+        /* Live testing against two independent real FFS handlers
+         * showed BOTH a full `size`-bounded read (garbage content,
+         * already documented) and a 0-byte read occur for a read that
+         * needs any byte at or past `written` -- genuinely not
+         * portably predictable (see stressfs_model_expect()'s matching
+         * comment). This guess (`actual`, the same as before) is kept
+         * purely as a best-effort internal placeholder; the model
+         * stops ASSERTING anything derived from `open_pos` for this
+         * file the moment that happens (`pos_trusted` below), so which
+         * guess is used here no longer matters for correctness -- only
+         * for generating plausible-looking subsequent synthetic ops. */
+        if (m->open_pos + actual > n->written) {
+            m->pos_trusted = 0;
+        }
         m->open_pos += actual;
         break;
     }
 
     case STRESSFS_OP_SEEK:
+        /* Always restores trust: the generator re-expresses every SEEK
+         * as an absolute OFFSET_BEGINNING target (random_ops.c), so
+         * Seek() unconditionally lands the real file pointer at
+         * `op->seek_offset` regardless of where it was before --
+         * confirmed live, this is what actually re-syncs the model
+         * with the real file after an untrusted-position READ. */
         m->open_pos = op->seek_offset < 0 ? 0 : (uint32_t)op->seek_offset;
+        m->pos_trusted = 1;
         break;
 
     case STRESSFS_OP_CLOSE:
@@ -303,11 +327,52 @@ stressfs_model_expect_t stressfs_model_expect(const stressfs_model_t *m, const s
         const stressfs_model_node_t *n = &m->nodes[m->open_node];
         uint32_t remaining = (m->open_pos < n->size) ? (n->size - m->open_pos) : 0;
         uint32_t actual = (op->length < remaining) ? op->length : remaining;
-        e.res1 = (long)actual; e.res1_any = 0;
+        /* FOUND WHILE PROVING M5 FOR REAL (not anticipated by the plan's
+         * text, and not what an earlier version of this function
+         * assumed): a read that needs any byte at or past `written` --
+         * i.e. inside a SETSIZE-grown-but-never-WRITTEN region, exactly
+         * the same region stressfs_model_byte_is_defined() already
+         * refuses to predict CONTENT for -- was observed to return
+         * byte COUNT 0 against two independent real FFS handlers
+         * (V40 and V47) at a position well inside `size`, not the
+         * size-bounded count this function used to assert. The
+         * apparent real behaviour: SetFileSize() updates the file's
+         * declared size but allocates no real data blocks for the
+         * grown region, and ACTION_READ's own EOF is bounded by the
+         * actual block chain (== `written`), not the declared size --
+         * so the COUNT a real Read() returns there is exactly as
+         * handler-specific as the CONTENT already was, not merely the
+         * content. Treating it as portable was the bug M5's
+         * fixed-seed runs surfaced (identical step, identical wrong
+         * shape, on two unrelated handlers -- the signature of a
+         * harness assumption, not a handler quirk). The fix mirrors
+         * stressfs_model_byte_is_defined()'s own boundary: once the
+         * read would need to return anything from offset `written`
+         * onward, the exact count is no longer portably predictable,
+         * so this leaves it `_any` instead of asserting the
+         * size-bounded figure. A read entirely within [pos, written)
+         * stays fully predictable, unchanged from before. */
+        /* `!m->pos_trusted` (set by a PRIOR op on this file, not this
+         * read's own range) also forces `_any`: once open_pos itself
+         * may not match the real file pointer, `remaining`/`actual`
+         * above are computed from a possibly-wrong starting point and
+         * can't be asserted even when they happen to land short of
+         * `written`. */
+        if (!m->pos_trusted || m->open_pos + actual > n->written) {
+            e.res1_any = 1;
+        } else {
+            e.res1 = (long)actual; e.res1_any = 0;
+        }
         break;
     }
     case STRESSFS_OP_SEEK:
-        e.res1 = (long)m->open_pos; e.res1_any = 0; /* Seek() returns the OLD position */
+        /* Seek() returns the OLD position -- not portably known once
+         * `pos_trusted` is false, per this struct's header comment;
+         * the NEW position this seek lands on is always fine (it's an
+         * absolute target, see stressfs_model_apply()'s SEEK case),
+         * only the reported OLD one is in question here. */
+        e.res1 = (long)m->open_pos;
+        e.res1_any = !m->pos_trusted;
         break;
     case STRESSFS_OP_CLOSE:
         break;

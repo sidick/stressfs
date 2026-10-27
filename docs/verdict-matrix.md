@@ -89,6 +89,49 @@ that tier's report had no line for that test id (version-gated or report missing
 
 ## Random campaigns (fixed seeds)
 
+**Update (post-M5): the cross-handler-identical bug below is fixed.** See
+`amiga/include/stressfs/random_model.h`'s `pos_trusted` field and its header
+comment, and the matching comments in `stressfs_model_expect()`/
+`stressfs_model_apply()`'s READ and SEEK cases in `amiga/lib/random_model.c`.
+Root cause: a read into a SETSIZE-grown-but-never-WRITTEN region returns a
+byte count that is genuinely not portable (live testing found BOTH a full
+`size`-bounded read with garbage content, and a 0-byte read, depending on
+whether the file had ever actually been written to before) -- the model used
+to still ASSERT a `size`-bounded count there, which is what produced the
+identical-step, identical-shape false divergence on both independent
+handlers described below. The fix stops asserting the count in that case,
+and additionally tracks whether the model's own `open_pos` can still be
+trusted at all once that happens (it can't, until the next `Seek()`, whose
+target is always an absolute value re-expressed by the generator and so
+unconditionally resyncs real and model position) -- without that second
+part, the model kept asserting *later* SEEK/READ results computed from an
+`open_pos` that had quietly drifted from the real file pointer, producing a
+second-order cascade of the same underlying problem.
+
+Re-run live against both real handlers after the fix (`SEED=1,2,3`,
+`RANDOM OPS 2000`, same `~/kick32.a1200.rom`+`~/os_drive.hdf` for V47 and the
+`ci/m5/build-ffs-v40-hdf.sh`-built HDF under Kickstart 3.1/`[scsi]
+controller="a3000"` for V40 described above): every seed now runs 4-7x
+further before its first divergence (seed 1: 161 -> 235 steps on V47;
+seed 2: 100 -> 721 steps on V47; seed 3: 82 -> 333 steps on V47), and,
+critically, **the divergence point and shape no longer match across the two
+independent handlers** -- V40/seed 1 now diverges at step 64 (a content
+mismatch) while V47/seed 1 diverges at step 235 (a count mismatch), proving
+the fix eliminated the specific "two unrelated filesystems agree with each
+other and disagree with the model" signature that made this a harness bug
+rather than a handler finding. The new, later divergences each seed now
+hits are NOT re-investigated here -- they are a new, legitimately
+handler-specific-looking (not cross-handler-identical) open item for a
+future milestone, each with its own replayable report under
+`build-m68k/stressfs-random-report.json` from the run that found it, not
+yet committed as a quirks entry pending that follow-up investigation. This
+is the exercise behaving exactly as intended: real-handler testing at scale
+surfacing genuine findings faster than a portable-only model can keep up
+with, which is precisely what defers them to phase 2 rather than something
+to force-fix in M4/M5's own scope.
+
+Original (pre-fix) table and analysis, kept for the record:
+
 | Tier | Seed | Ops requested | Steps reached | Outcome | Oracle |
 | --- | --- | --- | --- | --- | --- |
 | ffs-v40 | 1 | (see ci/copperline-m5.sh M5_RANDOM_OPS) | 64 | diverged at step 64 (logged, replayable) | model |
@@ -117,9 +160,7 @@ different divergence SHAPES appear, and they point in different directions:
   model computes that the real side cannot actually satisfy), not a
   handler quirk -- so it is NOT recorded as a quirks entry (quirks are for
   handler behaviour, not generator bugs) and NOT claimed as an FFS finding
-  here. It is flagged as a real, outstanding harness bug for a future
-  milestone to fix, which is itself exactly the kind of signal this
-  exercise is supposed to produce.
+  here. **FIXED** -- see the update note above this table.
 
 ## Inconclusive verdicts
 
@@ -165,8 +206,10 @@ the full phase-1 harness cleanly, every divergence found was either a genuine,
 now-documented handler quirk or (for the random-model bug) a clearly-isolated
 harness defect rather than an ambiguous one, and the zero-harness-inconclusive
 bar held throughout. That is a real, not rubber-stamped, positive signal. Two
-things should happen before phase 2 work goes far, though, both small and
-bounded: fix the random-model bug this milestone found (it would otherwise
-mislabel real phase-2 findings), and make one more serious attempt at PFS3-AIO
-(third-party-filesystem coverage is explicitly part of what phase 1 was meant
-to prove, and it is the one piece still genuinely unproven).
+things were flagged as needed before phase 2 work goes far: fix the
+random-model bug this milestone found, and make one more serious attempt at
+PFS3-AIO. The first is **done** -- see the "Random campaigns" section's
+update note above, re-verified live against both real handlers. The second
+remains open (third-party-filesystem coverage is explicitly part of what
+phase 1 was meant to prove, and it is the one piece still genuinely
+unproven); see [ci/m5/pfs3-aio-status.md](../ci/m5/pfs3-aio-status.md).

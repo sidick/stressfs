@@ -553,7 +553,16 @@ static void execute_op(const stressfs_op_t *op, long *res1, long *res2,
         n = Read(g_real_fh, g_io_buf, (LONG)len);
         *res1 = n;
         *res2 = (n < 0) ? IoErr() : 0;
-        if (n > 0) {
+        /* `base` is g_model.open_pos as believed BEFORE this op --
+         * once pos_trusted is false (see random_model.h's header
+         * comment) that belief may not match the real file pointer at
+         * all, which would make any "mismatch" found here meaningless
+         * (comparing the real bytes against the WRONG offset's
+         * expected content, not a genuine divergence). Skip the
+         * content check entirely in that case, same conservative
+         * "under-check, don't invent a precise tracker" choice M4 has
+         * made at every other untrusted-state boundary. */
+        if (n > 0 && g_model.pos_trusted) {
             LONG i;
             uint32_t file_id = g_model.nodes[g_model.open_node].file_id;
             for (i = 0; i < n; i++) {
