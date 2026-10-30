@@ -67,6 +67,39 @@ extern "C" {
 #define STRESSFS_MODEL_MAX_NODES 1024
 #define STRESSFS_MODEL_NAME_LEN  STRESSFS_RANDOM_NAME_LEN
 
+/* Ported from AmiFSX (https://github.com/lainejones/AmiFSX, MIT, an
+ * independent fsx-for-AmigaDOS port, unaffiliated with this project):
+ * a SETSIZE-grown-but-never-WRITTEN byte's value is undefined by
+ * AmigaDOS ("AmigaDOS doesn't promise that SetFileSize zero-fills, and
+ * FFS doesn't. It hands back old disk blocks."), but once something
+ * real IS on disk there, it should not change on its own -- so rather
+ * than skip checking that region entirely (M4's original choice,
+ * still the fallback once this cache is full), remember what the
+ * FIRST read at an undefined offset returned and assert every later
+ * read at that same offset returns the same byte. Catches real
+ * corruption in that region without inventing a portable expectation
+ * for its initial content, which AmigaDOS explicitly does not promise.
+ *
+ * A small, FIXED cache per node, not a growable one: this model
+ * deliberately never stores a file's actual content (random_model.h's
+ * top comment -- recomputed from seed+offset instead) specifically to
+ * keep the working set bounded regardless of file size, and storing
+ * every undefined byte ever read would reintroduce exactly the
+ * unbounded-per-file memory this design avoids. 16 entries (chosen to
+ * keep the per-node and total table cost small -- see
+ * stressfs_model_node_bytes()'s use in the working-set estimate,
+ * amiga/src/random.c) is enough to catch realistic repeated probes of
+ * one gap region in a run of this scope; once exhausted for a node, a
+ * read at a NEW undefined offset simply goes back to unchecked, the
+ * same graceful degradation already used when the node table itself
+ * fills up. */
+#define STRESSFS_MODEL_UNDEF_CACHE_CAP 16
+
+typedef struct {
+    uint32_t offset;
+    uint8_t value;
+} stressfs_undef_cache_entry_t;
+
 typedef enum {
     STRESSFS_NODE_FILE = 0,
     STRESSFS_NODE_DIR
@@ -83,6 +116,15 @@ typedef struct {
                              * (see stressfs_model_expected_byte()'s header comment --
                              * `size` can exceed this after a SETSIZE grow, and the
                              * gap is zero-filled, not PRNG content). */
+    /* FILE only: AmiFSX's "adopt first read, assert consistency" cache
+     * for the undefined (>= `written`) region -- see the macro's own
+     * comment above. Reset (count = 0) whenever the undefined region's
+     * shape changes: a fresh CREATE, or any SETSIZE (grow or truncate
+     * both change what is/isn't in that region, and a truncate then
+     * regrow past an old boundary is exactly the gap scenario the
+     * `written`-tracking WRITE case already treats conservatively). */
+    stressfs_undef_cache_entry_t undef_cache[STRESSFS_MODEL_UNDEF_CACHE_CAP];
+    int undef_cache_count;
 } stressfs_model_node_t;
 
 typedef struct stressfs_model_t {
@@ -210,8 +252,27 @@ uint8_t stressfs_model_content_byte(uint32_t seed, uint32_t file_id, uint32_t of
  * (amiga/src/random.c's READ comparison) must check this before
  * calling stressfs_model_content_byte() for a read-back byte, and
  * simply skip the content check (while still checking the returned
- * BYTE COUNT, which is portable) when it returns false. */
+ * BYTE COUNT, which is portable) when it returns false -- or, now,
+ * consult the AmiFSX-style cache below first; see
+ * STRESSFS_MODEL_UNDEF_CACHE_CAP's comment above. */
 int stressfs_model_byte_is_defined(const stressfs_model_t *m, int node_idx, uint32_t offset);
+
+/* Looks up a previously-recorded value for an undefined-zone `offset`
+ * in `node_idx`'s cache (see STRESSFS_MODEL_UNDEF_CACHE_CAP's
+ * comment). Returns 1 and sets `*out_byte` if found, 0 if this offset
+ * has never been recorded (or was evicted by the cache being full --
+ * callers then have nothing to compare against for this read, same
+ * as the original skip-entirely behaviour). */
+int stressfs_model_undef_cache_lookup(const stressfs_model_t *m, int node_idx,
+                                       uint32_t offset, uint8_t *out_byte);
+
+/* Records `value` as the first-observed byte at `offset` in
+ * `node_idx`'s undefined-zone cache, for stressfs_model_undef_cache_lookup()
+ * to check future reads against. A no-op if the cache is already full
+ * for this node (graceful degradation, not an error) or if `offset`
+ * is already recorded (first observation wins, never overwritten). */
+void stressfs_model_undef_cache_record(stressfs_model_t *m, int node_idx,
+                                        uint32_t offset, uint8_t value);
 
 /* sizeof(stressfs_model_node_t), exposed so the working-set estimate
  * (amiga/src/random.c) and any host test that wants to check the

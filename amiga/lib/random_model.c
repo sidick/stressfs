@@ -152,6 +152,7 @@ void stressfs_model_apply(stressfs_model_t *m, const stressfs_op_t *op)
         if (existing >= 0) {
             m->nodes[existing].size = 0;
             m->nodes[existing].written = 0;
+            m->nodes[existing].undef_cache_count = 0; /* new file identity; stale garbage observations don't apply */
             m->open_node = existing;
         } else {
             int idx = alloc_node(m);
@@ -296,6 +297,12 @@ void stressfs_model_apply(stressfs_model_t *m, const stressfs_op_t *op)
         if (n->written > n->size) {
             n->written = n->size;
         }
+        /* Either direction changes the undefined region's shape --
+         * truncate removes some of it, grow adds new space whose
+         * on-disk content this model has never observed -- so any
+         * previously cached "first observed byte" no longer applies
+         * (see STRESSFS_MODEL_UNDEF_CACHE_CAP's comment). */
+        n->undef_cache_count = 0;
         break;
     }
 
@@ -415,6 +422,38 @@ uint8_t stressfs_model_content_byte(uint32_t seed, uint32_t file_id, uint32_t of
 int stressfs_model_byte_is_defined(const stressfs_model_t *m, int node_idx, uint32_t offset)
 {
     return offset < m->nodes[node_idx].written;
+}
+
+int stressfs_model_undef_cache_lookup(const stressfs_model_t *m, int node_idx,
+                                       uint32_t offset, uint8_t *out_byte)
+{
+    const stressfs_model_node_t *n = &m->nodes[node_idx];
+    int i;
+    for (i = 0; i < n->undef_cache_count; i++) {
+        if (n->undef_cache[i].offset == offset) {
+            *out_byte = n->undef_cache[i].value;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+void stressfs_model_undef_cache_record(stressfs_model_t *m, int node_idx,
+                                        uint32_t offset, uint8_t value)
+{
+    stressfs_model_node_t *n = &m->nodes[node_idx];
+    int i;
+    if (n->undef_cache_count >= STRESSFS_MODEL_UNDEF_CACHE_CAP) {
+        return; /* full; graceful degradation, see the cap's own comment */
+    }
+    for (i = 0; i < n->undef_cache_count; i++) {
+        if (n->undef_cache[i].offset == offset) {
+            return; /* first observation wins, never overwritten */
+        }
+    }
+    n->undef_cache[n->undef_cache_count].offset = offset;
+    n->undef_cache[n->undef_cache_count].value = value;
+    n->undef_cache_count++;
 }
 
 size_t stressfs_model_node_bytes(void)

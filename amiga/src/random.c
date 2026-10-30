@@ -369,8 +369,10 @@ static void fixture_teardown(void)
  * (FileHandle/FileLock objects it allocates internally, which this
  * code does not control directly).
  *
- * At STRESSFS_MODEL_MAX_NODES nodes (random_model.h), this comes to a
- * few tens of KB -- comfortably inside the proposal's "4 MB comfortable
+ * At STRESSFS_MODEL_MAX_NODES nodes (random_model.h), this comes to
+ * roughly 150 KB (the AmiFSX-ported undef-cache per node,
+ * STRESSFS_MODEL_UNDEF_CACHE_CAP, is most of that growth over the
+ * original "a few tens of KB") -- comfortably inside the proposal's "4 MB comfortable
  * target" even on a stock A1200's stock 2 MB chip RAM, so the refusal
  * below is a real, if rarely-tripped, safety net rather than
  * decoration: it is what makes running stressfs on a genuinely
@@ -567,15 +569,40 @@ static void execute_op(const stressfs_op_t *op, long *res1, long *res2,
             uint32_t file_id = g_model.nodes[g_model.open_node].file_id;
             for (i = 0; i < n; i++) {
                 UBYTE want;
-                if (!stressfs_model_byte_is_defined(&g_model, g_model.open_node, base + (uint32_t)i)) {
-                    continue; /* grown-but-never-written region: handler-specific, not checked at M4 */
+                uint32_t off = base + (uint32_t)i;
+                if (!stressfs_model_byte_is_defined(&g_model, g_model.open_node, off)) {
+                    /* Grown-but-never-written region: AmigaDOS makes no
+                     * promise about its initial content (confirmed
+                     * live against real FFS -- see
+                     * stressfs_model_byte_is_defined()'s header
+                     * comment), so there is no portable WANT value to
+                     * compare against here. But once something real is
+                     * on disk there, it should stay put: ported from
+                     * AmiFSX (github.com/lainejones/AmiFSX, MIT), adopt
+                     * whatever the first read at this offset returned
+                     * and assert every later read matches it, instead
+                     * of leaving the region unchecked forever. */
+                    UBYTE cached;
+                    if (stressfs_model_undef_cache_lookup(&g_model, g_model.open_node, off, &cached)) {
+                        if (g_io_buf[i] != cached) {
+                            *diverged = 1;
+                            snprintf(reason, reasonsz,
+                                     "undefined-zone content changed at file offset %lu: "
+                                     "was 0x%02x (first read) now 0x%02x",
+                                     (unsigned long)off, cached, g_io_buf[i]);
+                            break;
+                        }
+                    } else {
+                        stressfs_model_undef_cache_record(&g_model, g_model.open_node, off, g_io_buf[i]);
+                    }
+                    continue;
                 }
-                want = stressfs_model_content_byte(g_seed, file_id, base + (uint32_t)i);
+                want = stressfs_model_content_byte(g_seed, file_id, off);
                 if (g_io_buf[i] != want) {
                     *diverged = 1;
                     snprintf(reason, reasonsz,
                              "content mismatch at file offset %lu: got 0x%02x want 0x%02x",
-                             (unsigned long)(base + (uint32_t)i), g_io_buf[i], want);
+                             (unsigned long)off, g_io_buf[i], want);
                     break;
                 }
             }

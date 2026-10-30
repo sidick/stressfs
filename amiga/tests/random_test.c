@@ -281,6 +281,57 @@ static void test_divergence_detection(void)
           "an INCORRECT result must be flagged as a divergence");
 }
 
+/* AmiFSX's "adopt first read, assert consistency" cache, ported into
+ * stressfs_model_undef_cache_lookup()/_record() (see
+ * STRESSFS_MODEL_UNDEF_CACHE_CAP's comment, random_model.h). */
+static void test_undef_cache(void)
+{
+    stressfs_model_t m;
+    stressfs_op_t op;
+    uint8_t got;
+    int node;
+    int i;
+
+    stressfs_model_init(&m);
+    memset(&op, 0, sizeof(op));
+    op.kind = STRESSFS_OP_CREATE;
+    op.parent_node = -1;
+    strcpy(op.new_name, "u.txt");
+    stressfs_model_apply(&m, &op);
+    node = m.open_node;
+
+    CHECK(!stressfs_model_undef_cache_lookup(&m, node, 5, &got),
+          "a fresh node has nothing cached yet");
+
+    stressfs_model_undef_cache_record(&m, node, 5, 0x42);
+    CHECK(stressfs_model_undef_cache_lookup(&m, node, 5, &got) && got == 0x42,
+          "a recorded offset must be returned on lookup");
+
+    stressfs_model_undef_cache_record(&m, node, 5, 0x99);
+    CHECK(stressfs_model_undef_cache_lookup(&m, node, 5, &got) && got == 0x42,
+          "the FIRST recorded value must win -- a later record() call must not overwrite it");
+
+    /* Fill the cache (one slot already used by offset 5 above) and
+     * confirm it degrades gracefully -- a lookup past capacity simply
+     * finds nothing, never crashes or corrupts an existing entry. */
+    for (i = 0; i < STRESSFS_MODEL_UNDEF_CACHE_CAP + 4; i++) {
+        stressfs_model_undef_cache_record(&m, node, (uint32_t)(100 + i), (uint8_t)i);
+    }
+    CHECK(stressfs_model_undef_cache_lookup(&m, node, 5, &got) && got == 0x42,
+          "the original entry must survive the cache filling up");
+    CHECK(!stressfs_model_undef_cache_lookup(&m, node, (uint32_t)(100 + STRESSFS_MODEL_UNDEF_CACHE_CAP + 2), &got),
+          "an offset past the cache's capacity must simply be absent, not crash");
+
+    /* SETSIZE changes the undefined region's shape -- the cache must
+     * reset (random_model.c's SETSIZE case). */
+    memset(&op, 0, sizeof(op));
+    op.kind = STRESSFS_OP_SETSIZE;
+    op.setsize_new_size = 50;
+    stressfs_model_apply(&m, &op);
+    CHECK(!stressfs_model_undef_cache_lookup(&m, node, 5, &got),
+          "SETSIZE must reset the undef cache: stale garbage from before doesn't apply to a new region");
+}
+
 int main(void)
 {
     test_determinism();
@@ -289,6 +340,7 @@ int main(void)
     test_model_write_read_content();
     test_model_rename_across_directories();
     test_divergence_detection();
+    test_undef_cache();
 
     if (failures > 0) {
         fprintf(stderr, "%d failure(s)\n", failures);
