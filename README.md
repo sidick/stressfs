@@ -38,3 +38,25 @@ single-writer lock, so a mutating packet on one file is refused with
 `ERROR_OBJECT_IN_USE` while an unrelated file elsewhere on the volume has an open write
 handle — tighter than FFS/PFS3/SFS's ordinary concurrent-writer semantics. That's being
 worked on upstream in Phoenix, not in stressfs.
+
+## Gotchas
+
+**`VOLUME` must be the on-disk volume label, not the Mountlist device name.**
+`stressfs_identify_handler()` (`amiga/src/handler_id.c`) resolves the name you pass in
+`VOLUME ...:` with `FindDosEntry(..., LDF_VOLUMES)` — a lookup by *volume label*, not by
+device name. A Mountlist entry's own name (e.g. `PHX0:`) is a separate thing: it is what
+makes dos.library start the handler on first access, but once mounted the handler
+registers its own VOLUME DosList entry under whatever label the volume was actually
+formatted with. If that label doesn't match the device name (e.g. device `PHX0:` serving
+a volume labelled `PhoenixWork`), passing `VOLUME PHX0:` to stressfs fails identification
+("no handler port for..."), or — if something already accessed the device so the label is
+live — resolves to the wrong node. Passing the *device* name before anything has touched
+it at all can also produce dos.library's "Please insert volume ... in any drive"
+requester, since nothing has triggered the lazy mount yet.
+
+Two ways to avoid this: format the volume with a label that matches the Mountlist device
+name (what the FFS tiers in `ci/m5/` do — e.g. `Work:`/`Work`), or just always pass
+`VOLUME` as whatever label the volume was actually formatted with, confirmed independently
+(e.g. `xdftool`/`rdbtool info`), rather than assuming it matches the device name in the
+Mountlist or boot script. Hit twice now against two different handlers (Phoenix, then
+again on a second Phoenix setup) — worth checking first rather than rediscovering.
